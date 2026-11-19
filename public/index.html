@@ -21,6 +21,10 @@
   .tile.over { outline: 2px solid #8b5cf6; z-index: 1; }
   .box { position: absolute; inset: 0; }
   .note { position: absolute; inset: 0; margin: 0; display: grid; place-content: center; color: #889; }
+  /* "Hide overlays": a transparent sheet keeps the mouse out of the player, so it never shows its hover UI. */
+  .shield { position: absolute; inset: 0; display: none; }
+  body.clean .tile:not(.chat) .shield { display: block; }
+  button[aria-pressed=true] { background: #6d43d9; border-color: #8b5cf6; }
   iframe { width: 100%; height: 100%; border: 0; display: block; }
   body.dragging iframe { pointer-events: none; }
   body.dragging .tile { transition: none; }
@@ -49,12 +53,17 @@
   dialog { background: #0d0f1d; color: inherit; border: 1px solid #2a2e4a; border-radius: 16px; min-width: min(360px, 90vw); }
   dialog::backdrop { background: #000a; }
   dialog h2 { margin: 0 0 16px; font-size: 20px; }
-  #savedList { list-style: none; padding: 0; margin: 0 0 12px; }
-  #savedList:empty::after { content: 'Nothing saved yet.'; color: #889; }
-  #savedList li { display: flex; gap: 6px; margin-bottom: 6px; }
-  #savedList li button:first-child { flex: 1; text-align: left; }
+  dialog h3 { margin: 20px 0 8px; font-size: 14px; color: #99a; }
+  .list { list-style: none; padding: 0; margin: 0 0 12px; }
+  .list:empty::after { content: 'Nothing saved yet.'; color: #889; }
+  .list li { display: flex; gap: 6px; margin-bottom: 6px; }
+  .list li button:first-child { flex: 1; text-align: left; }
   dialog form { display: flex; gap: 6px; margin-top: 6px; }
-  #saveName { flex: 1; }
+  dialog form input { flex: 1; }
+  #presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  #presets button { border-radius: 12px; padding: 8px 4px; display: grid; justify-items: center; gap: 6px; font-size: 12px; }
+  #presets svg { width: 56px; height: auto; max-height: 48px; }
+  #presets rect { fill: #2a2e4a; stroke: #8b5cf6; vector-effect: non-scaling-stroke; }
   /* Touch screens have no hover, so the controls stay visible and get finger-sized. */
   @media (hover: none) { .pill { opacity: .9; } #bar { opacity: 1; } }
   @media (pointer: coarse) { button, select, input { padding: 8px 12px; } .grip { padding: 8px 6px; } }
@@ -71,6 +80,8 @@
   <button>Add</button>
   <button type="button" id="chatBtn">Chat</button>
   <button type="button" id="muteBtn">Mute all</button>
+  <button type="button" id="layoutBtn">Layout</button>
+  <button type="button" id="cleanBtn" aria-pressed="false" title="Stops the players showing their own overlays on hover. Turn it off to use a player's own controls.">Hide overlays</button>
   <button type="button" id="savedBtn">Saved</button>
   <button type="button" id="shareBtn">Share</button>
   <button type="button" id="fsBtn">Fullscreen</button>
@@ -85,8 +96,16 @@
 </aside>
 <dialog id="savedDlg" aria-labelledby="savedTitle">
   <h2 id="savedTitle">Saved canvases</h2>
-  <ul id="savedList"></ul>
-  <form id="saveForm"><input id="saveName" placeholder="Name for the current canvas" aria-label="Name for the current canvas" required maxlength="40"><button>Save</button></form>
+  <ul class="list"></ul>
+  <form><input placeholder="Name for the current canvas" aria-label="Name for the current canvas" required maxlength="40"><button>Save</button></form>
+  <form method="dialog"><button>Close</button></form>
+</dialog>
+<dialog id="layoutDlg" aria-labelledby="layoutTitle">
+  <h2 id="layoutTitle">Layout</h2>
+  <div id="presets"></div>
+  <h3>Custom</h3>
+  <ul class="list"></ul>
+  <form><input placeholder="Name for the current layout" aria-label="Name for the current layout" required maxlength="40"><button>Save</button></form>
   <form method="dialog"><button>Close</button></form>
 </dialog>
 <!-- Twitch's player API, used for mute control. If it is blocked, Twitch tiles fall back to plain iframes. -->
@@ -139,22 +158,36 @@ function chatUrl(s) {
 
 const cum = (a, i) => a.slice(0, i).reduce((x, y) => x + y, 0);
 
-// Grid that gives 16:9 tiles the most width; with a focused tile, the rest become a bottom strip.
-// sz holds what the user dragged: column and row weights, and the strip's share of the height (0 = auto).
-// Returns tile rects plus the draggable edges between them.
-function layout(n, W, H, focus, sz = { c: [], r: [], strip: 0 }) {
+// Tile rects plus the draggable edges between them.
+// Grid: sz.cols columns, or when 0 the count that gives 16:9 tiles the most width.
+// With a focused tile: that one is big and the rest form a strip below it, or a column on the right (sz.side).
+// sz also holds what the user dragged: column and row weights, and the strip's share of the stage (0 = auto).
+function layout(n, W, H, focus, sz = {}) {
+  sz.c ??= [];
+  sz.r ??= [];
   if (focus >= 0 && n > 1) {
-    const w = W / (n - 1), sh = sz.strip ? H * sz.strip : Math.min(H * .25, w * 9 / 16);
+    const m = n - 1;
     let j = 0;
+    if (sz.side === 'right') {
+      const h = H / m, sw = sz.strip ? W * sz.strip : Math.min(W * .25, h * 16 / 9);
+      return {
+        tiles: Array.from({ length: n }, (_, i) => i === focus ? [0, 0, W - sw, H] : [W - sw, j++ * h, sw, h]),
+        splits: [{ d: 'strip', i: 0, v: true, x: W - sw }],
+      };
+    }
+    const w = W / m, sh = sz.strip ? H * sz.strip : Math.min(H * .25, w * 9 / 16);
     return {
       tiles: Array.from({ length: n }, (_, i) => i === focus ? [0, 0, W, H - sh] : [j++ * w, H - sh, w, sh]),
-      splits: [{ d: 'strip', i: 0, x: 0, y: H - sh }],
+      splits: [{ d: 'strip', i: 0, v: false, y: H - sh }],
     };
   }
-  let cols = 1, best = 0;
-  for (let c = 1; c <= n; c++) {
-    const w = Math.min(W / c, H / Math.ceil(n / c) * 16 / 9);
-    if (w > best) { best = w; cols = c; }
+  let cols = Math.min(sz.cols || 0, n), best = 0;
+  if (!cols) {
+    cols = 1;
+    for (let c = 1; c <= n; c++) {
+      const w = Math.min(W / c, H / Math.ceil(n / c) * 16 / 9);
+      if (w > best) { best = w; cols = c; }
+    }
   }
   const rows = Math.ceil(n / cols);
   if (sz.c.length !== cols) sz.c = Array(cols).fill(1); // grid shape changed: dragged sizes no longer apply
@@ -166,8 +199,8 @@ function layout(n, W, H, focus, sz = { c: [], r: [], strip: 0 }) {
       return [X(c), Y(r), X(c + 1) - X(c), Y(r + 1) - Y(r)];
     }),
     splits: [
-      ...Array.from({ length: cols - 1 }, (_, i) => ({ d: 'c', i, x: X(i + 1) })),
-      ...Array.from({ length: Math.max(0, rows - 1) }, (_, i) => ({ d: 'r', i, y: Y(i + 1) })),
+      ...Array.from({ length: cols - 1 }, (_, i) => ({ d: 'c', i, v: true, x: X(i + 1) })),
+      ...Array.from({ length: Math.max(0, rows - 1) }, (_, i) => ({ d: 'r', i, v: false, y: Y(i + 1) })),
     ],
   };
 }
@@ -177,8 +210,9 @@ const tiles = new Map(); // key -> element; tiles are positioned, never re-paren
 const splits = []; // pooled edge handles; reused so the one being dragged survives a render
 const EDGE = matchMedia('(pointer: coarse)').matches ? 20 : 8; // px thickness of a draggable edge
 const store = (k, v) => { try { return v === undefined ? localStorage.getItem(k) : localStorage.setItem(k, v); } catch { return null; } };
-let sizes = { c: [], r: [], strip: 0 };
+const sizes = { c: [], r: [], strip: 0, cols: 0, side: 'bottom' }; // the layout() settings in use
 try { Object.assign(sizes, JSON.parse(store('sizes'))); } catch {}
+const saveSizes = () => store('sizes', JSON.stringify(sizes));
 
 function makeSplit() {
   const el = document.createElement('div');
@@ -188,7 +222,7 @@ function makeSplit() {
   el.onpointermove = e => {
     if (!el.hasPointerCapture(e.pointerId)) return;
     const b = $('stage').getBoundingClientRect(), d = el.dataset.d, i = +el.dataset.i;
-    if (d === 'strip') sizes.strip = Math.max(.1, Math.min(.8, (b.bottom - e.clientY) / b.height));
+    if (d === 'strip') sizes.strip = Math.max(.1, Math.min(.8, sizes.side === 'right' ? (b.right - e.clientX) / b.width : (b.bottom - e.clientY) / b.height));
     else {
       const a = d === 'c' ? sizes.c : sizes.r, [pos, len] = d === 'c' ? [e.clientX - b.left, b.width] : [e.clientY - b.top, b.height];
       const all = cum(a, a.length), pair = a[i] + a[i + 1], min = Math.min(pair / 2, all * 100 / len); // 100px floor
@@ -197,8 +231,8 @@ function makeSplit() {
     }
     render();
   };
-  el.onpointerup = () => { document.body.classList.remove('dragging'); store('sizes', JSON.stringify(sizes)); };
-  el.ondblclick = () => { sizes = { c: [], r: [], strip: 0 }; store('sizes', ''); render(); };
+  el.onpointerup = () => { document.body.classList.remove('dragging'); saveSizes(); };
+  el.ondblclick = () => { Object.assign(sizes, { c: [], r: [], strip: 0 }); saveSizes(); render(); };
   $('stage').append(el);
   return el;
 }
@@ -214,9 +248,9 @@ function frame(src, title) {
 
 function makeTile(s) {
   const k = key(s), el = document.createElement('div');
-  el.className = 'tile';
+  el.className = 'tile' + (s.chat ? ' chat' : '');
   el.dataset.key = k;
-  el.innerHTML = `<p class="note"></p><div class="box"></div>
+  el.innerHTML = `<p class="note"></p><div class="box"></div><div class="shield"></div>
     <div class="pill"><span class="grip" title="Drag onto another stream to swap">:: </span>
     <button data-a="sound" title="Make this the only stream with sound">Sound</button>
     <button data-a="chat" title="Show this stream's chat as its own tile">Chat</button>
@@ -310,10 +344,10 @@ function render() {
   splits.forEach((el, i) => {
     const s = L.splits[i];
     if ((el.hidden = !s)) return;
-    const v = s.d === 'c'; // vertical bar between columns, else horizontal bar between rows
+    const v = s.v; // vertical bar (drags sideways), else horizontal bar
     Object.assign(el.dataset, { d: s.d, i: s.i });
     el.className = 'split ' + (v ? 'v' : 'h');
-    el.setAttribute('aria-label', v ? `Resize columns ${s.i + 1} and ${s.i + 2}` : `Resize rows ${s.i + 1} and ${s.i + 2}`);
+    el.setAttribute('aria-label', s.d === 'strip' ? 'Resize the strip of small streams' : `Resize ${v ? 'columns' : 'rows'} ${s.i + 1} and ${s.i + 2}`);
     Object.assign(el.style, v ? { left: s.x - EDGE / 2 + 'px', top: 0, width: EDGE + 'px', height: H + 'px' }
       : { left: 0, top: s.y - EDGE / 2 + 'px', width: W + 'px', height: EDGE + 'px' });
   });
@@ -344,28 +378,76 @@ function load(hash) {
   render();
 }
 
-// Saved canvases: name -> hash, kept in this browser only.
-const saved = () => { try { return JSON.parse(store('saved')) || {}; } catch { return {}; } };
-function drawSaved() {
-  const all = saved();
-  $('savedList').replaceChildren(...Object.keys(all).map(name => {
-    const li = document.createElement('li'), open = document.createElement('button'), del = document.createElement('button');
-    open.textContent = name;
-    open.onclick = () => { load(all[name]); $('savedDlg').close(); };
-    del.textContent = 'Delete';
-    del.setAttribute('aria-label', 'Delete ' + name);
-    del.onclick = () => { const a = saved(); delete a[name]; store('saved', JSON.stringify(a)); drawSaved(); };
-    li.append(open, del);
-    return li;
+// A named list kept in this browser only: wires a dialog's list and its save form to localStorage key k.
+// snapshot() is what gets saved under the typed name; open(value) applies a saved entry. Returns the redraw.
+function saver(k, dlg, snapshot, open) {
+  const bag = () => { try { return JSON.parse(store(k)) || {}; } catch { return {}; } };
+  const list = dlg.querySelector('.list'), form = dlg.querySelector('form'), input = form.querySelector('input');
+  const draw = () => {
+    const all = bag();
+    list.replaceChildren(...Object.keys(all).map(name => {
+      const li = document.createElement('li'), go = document.createElement('button'), del = document.createElement('button');
+      go.textContent = name;
+      go.onclick = () => { open(all[name]); dlg.close(); };
+      del.textContent = 'Delete';
+      del.setAttribute('aria-label', 'Delete ' + name);
+      del.onclick = () => { const a = bag(); delete a[name]; store(k, JSON.stringify(a)); draw(); };
+      li.append(go, del);
+      return li;
+    }));
+  };
+  form.onsubmit = e => {
+    e.preventDefault();
+    store(k, JSON.stringify({ ...bag(), [input.value.trim()]: snapshot() }));
+    input.value = '';
+    draw();
+  };
+  return draw;
+}
+
+// Saved canvases: which streams are open.
+const drawSaved = saver('saved', $('savedDlg'), () => streams.map(key).join(','), load);
+$('savedBtn').onclick = () => { drawSaved(); $('savedDlg').showModal(); };
+
+// Layouts: how the streams are arranged, whatever they are.
+const PRESETS = [['Auto', { cols: 0 }], ['1 column', { cols: 1 }], ['2 columns', { cols: 2 }], ['3 columns', { cols: 3 }],
+  ['4 columns', { cols: 4 }], ['Big + strip', { side: 'bottom' }], ['Big + side', { side: 'right' }]];
+function applyLayout(p) { // p has cols for a grid, or side for one big stream plus the rest
+  Object.assign(sizes, { c: [], r: [], strip: 0 }, p);
+  focusKey = p.side && streams.length ? focusKey ?? key(streams.find(s => !s.chat) ?? streams[0]) : null;
+  saveSizes();
+  render();
+}
+function drawPresets() { // each button previews the result for the streams open now (4 when there are none)
+  const n = streams.length || 4, W = $('stage').clientWidth, H = $('stage').clientHeight, pad = W / 50;
+  $('presets').replaceChildren(...PRESETS.map(([name, p]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.innerHTML = `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true">${layout(n, W, H, p.side ? 0 : -1, { ...p }).tiles.map(([x, y, w, h]) =>
+      `<rect x="${x + pad}" y="${y + pad}" width="${Math.max(1, w - 2 * pad)}" height="${Math.max(1, h - 2 * pad)}" rx="${pad}"/>`).join('')}</svg>`;
+    b.append(name);
+    b.onclick = () => { applyLayout(p); $('layoutDlg').close(); };
+    return b;
   }));
 }
-$('savedBtn').onclick = () => { drawSaved(); $('savedDlg').showModal(); };
-$('saveForm').onsubmit = e => {
-  e.preventDefault();
-  store('saved', JSON.stringify({ ...saved(), [$('saveName').value.trim()]: streams.map(key).join(',') }));
-  $('saveName').value = '';
-  drawSaved();
-};
+const drawLayouts = saver('layouts', $('layoutDlg'),
+  () => ({ ...sizes, focus: streams.map(key).indexOf(focusKey), nochat: document.body.classList.contains('nochat'), chatW: $('chat').style.width }),
+  v => {
+    Object.assign(sizes, { c: v.c ?? [], r: v.r ?? [], strip: v.strip || 0, cols: v.cols || 0, side: v.side });
+    focusKey = streams[v.focus] ? key(streams[v.focus]) : null;
+    store('nochat', document.body.classList.toggle('nochat', !!v.nochat) ? '1' : '');
+    store('chatW', $('chat').style.width = v.chatW || '');
+    saveSizes();
+    render();
+  });
+$('layoutBtn').onclick = () => { drawPresets(); drawLayouts(); $('layoutDlg').showModal(); };
+
+function setClean(on) {
+  document.body.classList.toggle('clean', on);
+  $('cleanBtn').setAttribute('aria-pressed', on);
+  store('clean', on ? '1' : '');
+}
+$('cleanBtn').onclick = () => setClean(!document.body.classList.contains('clean'));
 
 $('bar').onsubmit = e => {
   e.preventDefault();
@@ -421,12 +503,16 @@ if (location.search.startsWith('?test')) {
   eq(layout(4, 1600, 900, -1).tiles[3], [800, 450, 800, 450]);
   eq(layout(3, 1600, 900, 0).tiles[0], [0, 0, 1600, 675]);
   eq(layout(2, 2000, 900, -1, { c: [3, 1], r: [1], strip: 0 }).tiles[1], [1500, 0, 500, 900]);
-  eq(layout(3, 1600, 900, 0, { c: [], r: [], strip: .5 }).splits, [{ d: 'strip', i: 0, x: 0, y: 450 }]);
+  eq(layout(3, 1600, 900, 0, { c: [], r: [], strip: .5 }).splits, [{ d: 'strip', i: 0, v: false, y: 450 }]);
+  eq(layout(3, 1600, 900, 0, { side: 'right', strip: .25 }).tiles, [[0, 0, 1200, 900], [1200, 0, 400, 450], [1200, 450, 400, 450]]);
+  eq(layout(4, 1600, 900, -1, { cols: 4 }).tiles[3], [1200, 0, 400, 900]);
+  eq(layout(2, 1600, 900, -1, { cols: 4 }).tiles[1], [800, 0, 800, 900]);
   document.title = 'tests ran';
 }
 
 if (store('nochat')) document.body.classList.add('nochat');
 if (store('min')) document.body.classList.add('min');
+setClean(!!store('clean'));
 $('chat').style.width = store('chatW') || '';
 load(location.hash.slice(1) || store('streams') || '');
 </script>
