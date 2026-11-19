@@ -16,9 +16,13 @@ export default {
     });
     if (!res.ok) return Response.json({ error: 'not found' }, { status: 404 });
 
-    // shortcut: scrapes the canonical link from the page, breaks if YouTube changes it; upgrade to the Data API (needs a key)
+    // shortcut: scrapes ids out of the page, breaks if YouTube changes it; upgrade to the Data API (needs a key)
+    // A live channel answers with its watch page. From Cloudflare's network that page often comes without
+    // its title and canonical link (seen 2026-11-18), so currentVideoEndpoint is the fallback; an offline
+    // channel answers with its channel page, which has neither.
     const html = await res.text();
-    const videoId = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([\w-]{11})"/)?.[1];
+    const videoId = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([\w-]{11})"/)?.[1]
+      ?? html.match(/"currentVideoEndpoint":.{0,400}?"videoId":"([\w-]{11})"/)?.[1];
     const channelId = html.match(/"(?:channelId|externalId)":"(UC[\w-]{22})"/)?.[1];
     if (!videoId && !channelId) return Response.json({ error: 'not found' }, { status: 404 });
     return Response.json({ videoId, channelId }, { headers: { 'cache-control': 'public, max-age=60' } });
