@@ -1,9 +1,24 @@
-// Static files in ./public are served by the platform before this runs.
-// This Worker only answers /api/yt, which turns a YouTube @handle into what the page can embed:
-// { videoId } when the channel is live, else { channelId }.
+// Static files in ./public are served by the platform before this runs. This Worker answers:
+//   /api/yt?handle=  a YouTube @handle -> { videoId } when the channel is live, else { channelId }
+//   /api/hls?u=      a Kick stream's master playlist, relayed so a script HLS player can read it
 export default {
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/api/hls') {
+      // Kick's master playlist only allows cross-origin reads from kick.com, which blocks hls.js in
+      // browsers without native HLS (Firefox desktop). Everything the playlist points at allows any
+      // origin, so relaying this one small text file is enough.
+      // Strict allowlist so this is not an open proxy: only Kick's (Amazon IVS) channel playlists.
+      const u = url.searchParams.get('u') ?? '';
+      if (!/^https:\/\/[a-z0-9]+\.[a-z0-9-]+\.playback\.live-video\.net\/api\/video\/v1\/[\w.-]+\.m3u8\?token=[\w.-]+$/.test(u)) {
+        return Response.json({ error: 'bad playlist url' }, { status: 400 });
+      }
+      const res = await fetch(u);
+      return new Response(res.body, {
+        status: res.status,
+        headers: { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' },
+      });
+    }
     if (url.pathname !== '/api/yt') return new Response('Not found', { status: 404 });
 
     // Strict allowlist: the handle is the only user input that reaches the upstream URL.

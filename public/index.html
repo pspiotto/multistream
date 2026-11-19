@@ -153,11 +153,22 @@ async function resolve(s) {
   return id ? { ...s, id } : null;
 }
 
-// Browsers that play HLS themselves (Safari, and every browser on iPad and iPhone) can show a Kick stream in
-// a plain <video>. Others cannot: Kick's master playlist only allows cross-origin reads from kick.com, which
-// a script-based HLS player would need. Those browsers keep Kick's embed.
+// Kick streams play in a plain <video> of ours. Browsers that play HLS themselves (Safari, every browser on
+// iPad and iPhone, recent Chrome) take the stream URL directly. The rest (Firefox desktop) use hls.js, which
+// must read the master playlist through /api/hls because Kick only allows cross-origin reads from kick.com.
+// "?hlsjs" in the address forces the hls.js path, for testing it in a browser that has native HLS.
 const probe = document.createElement('video');
-const NATIVE_HLS = !!probe.canPlayType('application/vnd.apple.mpegurl');
+const NATIVE_HLS = !location.search.includes('hlsjs') && !!probe.canPlayType('application/vnd.apple.mpegurl');
+let hlsLib; // hls.js is only downloaded when a Kick tile needs it
+const loadHls = () => hlsLib ??= new Promise(done => {
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js';
+  s.integrity = 'sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr';
+  s.crossOrigin = 'anonymous';
+  s.onload = () => done(window.Hls?.isSupported() ? window.Hls : null);
+  s.onerror = () => done(null);
+  document.head.append(s);
+});
 probe.volume = .5;
 const CANVOL = probe.volume === .5; // iOS ignores volume set from a page; only the hardware buttons work
 // shortcut: Kick's unofficial channel API, breaks if they change or lock it; any failure falls back to the embed
@@ -283,6 +294,8 @@ function makeTile(s) {
 
   // (Re)builds the player. el.mute(bool) is how setSound reaches it; el.cheap marks mutes that do not reload.
   el.start = async () => {
+    el.hls?.destroy(); // stop a previous hls.js player's downloads before rebuilding
+    el.hls = null;
     box.replaceChildren();
     note.textContent = 'Loading...';
     el.mute = null;
@@ -315,11 +328,22 @@ function makeTile(s) {
       const pl = new Twitch.Player(box, { channel: s.id, parent: [host], muted, width: '100%', height: '100%' });
       el.mute = m => pl.setMuted(m);
       el.vol = x => pl.setVolume(x);
-    } else if (s.p === 'k' && NATIVE_HLS && (el.hls = await kickHls(s.id))) {
+    } else if (s.p === 'k') {
       // Our own <video> instead of Kick's embed: sound switches without a reload, and at full quality.
+      // Any failure on the way (offline, lookup blocked, hls.js missing, playback error) uses Kick's embed.
+      const src = await kickHls(s.id), Hls = src && !NATIVE_HLS && await loadHls();
+      if (!src || !(NATIVE_HLS || Hls)) return embed();
       const v = document.createElement('video');
-      Object.assign(v, { src: el.hls, autoplay: true, playsInline: true, controls: true, muted, title: label(s) });
-      v.onerror = embed; // if the stream will not play this way, use Kick's own player after all
+      Object.assign(v, { autoplay: true, playsInline: true, controls: true, muted: soundKey !== k, title: label(s) });
+      if (Hls) {
+        const h = el.hls = new Hls();
+        h.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { h.destroy(); el.hls = null; embed(); } });
+        h.loadSource('/api/hls?u=' + encodeURIComponent(src));
+        h.attachMedia(v);
+      } else {
+        v.src = src;
+        v.onerror = embed;
+      }
       el.mute = m => { v.muted = m; };
       el.vol = x => { v.volume = x; };
       box.replaceChildren(v);
@@ -369,7 +393,7 @@ function setSound(k) {
 
 function render() {
   const keys = streams.map(key);
-  for (const [k, el] of tiles) if (!keys.includes(k)) { el.remove(); tiles.delete(k); }
+  for (const [k, el] of tiles) if (!keys.includes(k)) { el.hls?.destroy(); el.remove(); tiles.delete(k); }
   for (const s of streams) if (!tiles.has(key(s))) tiles.set(key(s), makeTile(s));
   if (!keys.includes(focusKey)) focusKey = null;
   if (!keys.includes(soundKey)) soundKey = null;
