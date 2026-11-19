@@ -25,7 +25,10 @@
   .shield { position: absolute; inset: 0; display: none; }
   body.clean .tile:not(.chat) .shield { display: block; }
   button[aria-pressed=true] { background: #6d43d9; border-color: #8b5cf6; }
-  iframe { width: 100%; height: 100%; border: 0; display: block; }
+  iframe, video { width: 100%; height: 100%; border: 0; display: block; background: #000; }
+  /* The volume slider belongs to the stream that has sound, and only where volume can be set. */
+  [data-a=vol] { width: 80px; padding: 0; accent-color: #8b5cf6; }
+  .tile:not(.loud) [data-a=vol], .tile.novol [data-a=vol] { display: none; }
   body.dragging iframe { pointer-events: none; }
   body.dragging .tile { transition: none; }
   .split { position: absolute; z-index: 1; touch-action: none; }
@@ -65,7 +68,13 @@
   #presets svg { width: 56px; height: auto; max-height: 48px; }
   #presets rect { fill: #2a2e4a; stroke: #8b5cf6; vector-effect: non-scaling-stroke; }
   /* Touch screens have no hover, so the controls stay visible and get finger-sized. */
-  @media (hover: none) { .pill { opacity: .9; } #bar { opacity: 1; } }
+  @media (hover: none) {
+    .pill { opacity: .9; }
+    #bar { opacity: 1; }
+    /* Menu collapses everything on touch: the toolbar and each stream's controls. */
+    body.min .pill { opacity: 0; pointer-events: none; }
+    body.min #bar { opacity: .5; }
+  }
   @media (pointer: coarse) { button, select, input { padding: 8px 12px; } .grip { padding: 8px 6px; } }
 </style>
 </head>
@@ -143,6 +152,17 @@ async function resolve(s) {
   const id = r.videoId || r.channelId;
   return id ? { ...s, id } : null;
 }
+
+// Browsers that play HLS themselves (Safari, and every browser on iPad and iPhone) can show a Kick stream in
+// a plain <video>. Others cannot: Kick's master playlist only allows cross-origin reads from kick.com, which
+// a script-based HLS player would need. Those browsers keep Kick's embed.
+const probe = document.createElement('video');
+const NATIVE_HLS = !!probe.canPlayType('application/vnd.apple.mpegurl');
+probe.volume = .5;
+const CANVOL = probe.volume === .5; // iOS ignores volume set from a page; only the hardware buttons work
+// shortcut: Kick's unofficial channel API, breaks if they change or lock it; any failure falls back to the embed
+const kickHls = id => fetch(`https://kick.com/api/v2/channels/${id}`).then(r => r.ok ? r.json() : null)
+  .then(j => j?.livestream && /^https:\/\//.test(j.playback_url) ? j.playback_url : null).catch(() => null);
 
 function videoUrl(s, muted) {
   if (s.p === 't') return `https://player.twitch.tv/?channel=${s.id}&parent=${host}&muted=${muted}`;
@@ -253,6 +273,7 @@ function makeTile(s) {
   el.innerHTML = `<p class="note"></p><div class="box"></div><div class="shield"></div>
     <div class="pill"><span class="grip" title="Drag onto another stream to swap">:: </span>
     <button data-a="sound" title="Make this the only stream with sound">Sound</button>
+    <input data-a="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
     <button data-a="chat" title="Show this stream's chat as its own tile">Chat</button>
     <button data-a="max">Max</button><button data-a="reload">Reload</button><button data-a="remove">Remove</button></div>`;
   const [note, box] = el.children, grip = el.querySelector('.grip');
@@ -274,22 +295,40 @@ function makeTile(s) {
       return void (u ? box.append(frame(u, label(s))) : note.textContent = 'No chat: this channel is not live.');
     }
     el.cheap = true;
+    el.vol = null; // el.vol(0..1) exists where the player lets us set volume
+    const embed = () => {
+      const f = frame(videoUrl(r, soundKey !== k), label(s));
+      if (s.p === 'y') {
+        const cmd = (func, ...args) => f.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), 'https://www.youtube.com');
+        el.mute = m => cmd(m ? 'mute' : 'unMute');
+        el.vol = x => cmd('setVolume', x * 100);
+      } else {
+        // shortcut: Kick's embed (and Twitch without its SDK) takes no commands, so muting reloads it
+        el.cheap = false;
+        el.vol = null;
+        el.mute = m => { f.src = videoUrl(r, m); };
+      }
+      box.replaceChildren(f);
+      el.classList.toggle('novol', !el.vol || !CANVOL);
+    };
     if (s.p === 't' && window.Twitch?.Player) {
       const pl = new Twitch.Player(box, { channel: s.id, parent: [host], muted, width: '100%', height: '100%' });
       el.mute = m => pl.setMuted(m);
-      return;
-    }
-    const f = frame(videoUrl(r, muted), label(s));
-    if (s.p === 'y') el.mute = m => f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: m ? 'mute' : 'unMute', args: [] }), 'https://www.youtube.com');
-    else {
-      // shortcut: Kick has no player API, so muting reloads its player; switch to an API if Kick ships one
-      el.cheap = false;
-      el.mute = m => { f.src = videoUrl(r, m); };
-    }
-    box.append(f);
+      el.vol = x => pl.setVolume(x);
+    } else if (s.p === 'k' && NATIVE_HLS && (el.hls = await kickHls(s.id))) {
+      // Our own <video> instead of Kick's embed: sound switches without a reload, and at full quality.
+      const v = document.createElement('video');
+      Object.assign(v, { src: el.hls, autoplay: true, playsInline: true, controls: true, muted, title: label(s) });
+      v.onerror = embed; // if the stream will not play this way, use Kick's own player after all
+      el.mute = m => { v.muted = m; };
+      el.vol = x => { v.volume = x; };
+      box.replaceChildren(v);
+    } else return embed();
+    el.classList.toggle('novol', !CANVOL);
   };
   el.start();
 
+  el.querySelector('[data-a=vol]').oninput = e => el.vol?.(+e.target.value);
   el.onclick = e => {
     const a = e.target.dataset.a;
     if (a === 'sound') setSound(soundKey === k ? null : k);
