@@ -1,5 +1,6 @@
 {
   "name": "multistream",
+  "description": "Watch Twitch, Kick and YouTube streams side by side",
   "private": true,
   "scripts": {
     "dev": "wrangler dev --port 8080",
