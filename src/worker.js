@@ -2,6 +2,7 @@
 //   /api/yt?handle=  a YouTube @handle -> { videoId } when the channel is live, else { channelId }
 //   /api/hls?u=      a Kick stream's master playlist, relayed so a script HLS player can read it
 //   /api/tw?c=       a Twitch channel's master playlist, fetched with an ad-free playback token
+//   /api/tw?v=       one of that playlist's variant playlists, relayed for hls.js (Twitch blocks our Origin)
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -20,12 +21,27 @@ export default {
         headers: { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' },
       });
     }
+    if (url.pathname === '/api/tw' && url.searchParams.has('v')) {
+      // A Twitch variant playlist. *.playlist.ttvnw.net answers 403 to any request whose Origin is
+      // not Twitch's or localhost (observed 2026-11-19, for every playerType), and hls.js always sends
+      // one, so it reads these through here. Native HLS players send no Origin and fetch directly.
+      // Strict allowlist so this is not an open proxy.
+      const v = url.searchParams.get('v');
+      if (!/^https:\/\/[a-z0-9-]+\.playlist\.ttvnw\.net\/v1\/playlist\/[\w-]+\.m3u8$/.test(v)) {
+        return Response.json({ error: 'bad playlist url' }, { status: 400 });
+      }
+      const res = await fetch(v);
+      return new Response(res.body, {
+        status: res.status,
+        headers: { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' },
+      });
+    }
     if (url.pathname === '/api/tw') {
       // Twitch stitches ads into the HLS playlist based on the playback token's playerType: an
       // anonymous "site" token gets a 30 s pre-roll, an "embed" token a clean playlist (observed
       // 2026-11-19, same IP). We mint the token ourselves, so no proxy is needed. usher sends no
-      // CORS header, so the master is relayed here; the variant playlists and segments it points
-      // at allow any origin and load directly.
+      // CORS header, so the master is relayed here. Segments allow any origin and load directly;
+      // native HLS players fetch the variants directly too, hls.js goes through ?v= above.
       const c = url.searchParams.get('c') ?? '';
       if (!/^\w{2,25}$/.test(c)) return Response.json({ error: 'bad channel' }, { status: 400 });
       const CID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'; // Twitch's public web client id

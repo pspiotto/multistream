@@ -107,6 +107,7 @@ that match a file never reach the Worker; it only answers:
 | `/api/yt?handle=name` | `{ videoId, channelId }` for a YouTube handle. `videoId` is present when the channel is live. |
 | `/api/hls?u=url` | Relays a Kick master playlist. Only Kick's stream playlist URLs are accepted. |
 | `/api/tw?c=name` | Mints an anonymous ad-free Twitch playback token and relays the master playlist it unlocks. |
+| `/api/tw?v=url` | Relays one Twitch variant playlist for hls.js, which Twitch refuses to serve to other sites. |
 
 To host your own copy, change `routes` in `wrangler.jsonc` to your domain. Nothing else is tied to the
 hostname: the page passes whatever host it is served from to Twitch and YouTube.

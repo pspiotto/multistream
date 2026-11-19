@@ -157,7 +157,7 @@ async function resolve(s) {
 // Kick and Twitch streams play in a plain <video> of ours. Browsers that play HLS themselves (Safari, every
 // browser on iPad and iPhone, recent Chrome) take the stream URL directly. The rest (Firefox desktop) use
 // hls.js, which must read the master playlist through the Worker (/api/hls, /api/tw) because neither Kick
-// nor Twitch's usher allows cross-origin reads from us. "?hlsjs" in the address forces the hls.js path,
+// nor Twitch's usher allows cross-origin reads from us, and Twitch's variant playlists too (/api/tw?v=). "?hlsjs" in the address forces the hls.js path,
 // for testing it in a browser that has native HLS.
 const probe = document.createElement('video');
 const NATIVE_HLS = !location.search.includes('hlsjs') && !!probe.canPlayType('application/vnd.apple.mpegurl');
@@ -340,7 +340,13 @@ function makeTile(s) {
       const v = document.createElement('video');
       Object.assign(v, { autoplay: true, playsInline: true, controls: true, muted: soundKey !== k, title: label(s) });
       if (Hls) {
-        const h = el.hls = new Hls();
+        // Twitch's variant playlists refuse our Origin (403), so hls.js reads them through /api/tw.
+        // Segments allow any origin and still load directly.
+        const h = el.hls = new Hls(s.p !== 't' ? {} : {
+          xhrSetup(xhr, u) {
+            if (/^https:\/\/[a-z0-9-]+\.playlist\.ttvnw\.net\//.test(u)) xhr.open('GET', '/api/tw?v=' + encodeURIComponent(u), true);
+          },
+        });
         h.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { h.destroy(); el.hls = null; embed(); } });
         h.loadSource(src);
         h.attachMedia(v);

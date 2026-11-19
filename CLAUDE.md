@@ -26,8 +26,10 @@ Domain facts for agents working in this repo. User-facing documentation is in RE
   `frontpage` and `mobile` came back clean from the same IP, and `embed` also clean through Cloudflare Worker
   egress (`wrangler dev --remote`). That is why `/api/tw` mints an `embed` token and no proxy is needed
   (2026-11-19). If ads return, the playerType constant in `src/worker.js` is the one line to change.
-- `usher.ttvnw.net` master playlists send no CORS header (the Worker relays them); variant playlists
-  (`*.playlist.ttvnw.net`) and segments (`*.cloudfront.hls.ttvnw.net`) send `*` (2026-11-19).
+- `usher.ttvnw.net` master playlists send no CORS header (the Worker relays them). Variant playlists
+  (`*.playlist.ttvnw.net`) send `*` but answer 403 to any Origin other than Twitch's or `localhost`, for
+  every playerType, so hls.js reads them through `/api/tw?v=` and a localhost test does not catch it.
+  Native HLS sends no Origin. Segments (`*.cloudfront.hls.ttvnw.net`) allow any origin (2026-11-19).
 - usher answers 404 `[{"error":"Can not find channel"}]` both for a missing channel and for an offline one;
   check `stream: null` in GQL to tell them apart (monstercat itself was offline 2026-11-19).
 - pixeltris/TwitchAdSolutions is archived (2026-03-05); the maintained list is zGato/ScrewTwitchAds.
