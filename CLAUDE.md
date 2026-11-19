@@ -5,8 +5,8 @@ Domain facts for agents working in this repo. User-facing documentation is in RE
 ## Shape
 
 - The whole app is `public/index.html`: vanilla JS, no build, no framework, no bundler. Keep it that way.
-- `src/worker.js` is a Cloudflare Worker with two endpoints, `/api/yt` and `/api/hls`. Static assets are
-  served before the Worker runs, so it never sees requests for files in `public/`.
+- `src/worker.js` is a Cloudflare Worker with three endpoints, `/api/yt`, `/api/hls` and `/api/tw`.
+  Static assets are served before the Worker runs, so it never sees requests for files in `public/`.
 - State is the URL hash (`#t:name,k:name,y:@handle,tc:name`). `parse()` is the single place user input is
   validated before it reaches an iframe `src` or a fetch; route new input forms through it.
 - Tiles are absolutely positioned by `layout()` and never re-parented, because moving an iframe in the
