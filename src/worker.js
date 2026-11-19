@@ -1,6 +1,7 @@
 // Static files in ./public are served by the platform before this runs. This Worker answers:
 //   /api/yt?handle=  a YouTube @handle -> { videoId } when the channel is live, else { channelId }
 //   /api/hls?u=      a Kick stream's master playlist, relayed so a script HLS player can read it
+//   /api/tw?c=       a Twitch channel's master playlist, fetched with an ad-free playback token
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -14,6 +15,35 @@ export default {
         return Response.json({ error: 'bad playlist url' }, { status: 400 });
       }
       const res = await fetch(u);
+      return new Response(res.body, {
+        status: res.status,
+        headers: { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' },
+      });
+    }
+    if (url.pathname === '/api/tw') {
+      // Twitch stitches ads into the HLS playlist based on the playback token's playerType: an
+      // anonymous "site" token gets a 30 s pre-roll, an "embed" token a clean playlist (observed
+      // 2026-11-19, same IP). We mint the token ourselves, so no proxy is needed. usher sends no
+      // CORS header, so the master is relayed here; the variant playlists and segments it points
+      // at allow any origin and load directly.
+      const c = url.searchParams.get('c') ?? '';
+      if (!/^\w{2,25}$/.test(c)) return Response.json({ error: 'bad channel' }, { status: 400 });
+      const CID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'; // Twitch's public web client id
+      const gql = await fetch('https://gql.twitch.tv/gql', {
+        method: 'POST',
+        headers: { 'client-id': CID, 'content-type': 'application/json' },
+        // c is [\w]{2,25}, so it cannot break out of the quotes
+        body: JSON.stringify({ query: `{ streamPlaybackAccessToken(channelName: "${c}", params: {platform: "web", playerBackend: "mediaplayer", playerType: "embed"}) { value signature } }` }),
+      });
+      const tok = (await gql.json().catch(() => null))?.data?.streamPlaybackAccessToken;
+      if (!tok) return Response.json({ error: 'no token' }, { status: 502 });
+      const u = new URL(`https://usher.ttvnw.net/api/channel/hls/${c}.m3u8`);
+      for (const [k, v] of Object.entries({
+        client_id: CID, token: tok.value, sig: tok.signature,
+        supported_codecs: 'av1,h264', allow_source: 'true', allow_audio_only: 'true',
+        player: 'twitchweb', p: String(Math.floor(Math.random() * 1e6)),
+      })) u.searchParams.set(k, v);
+      const res = await fetch(u); // 404 = channel offline; the client falls back to Twitch's embed
       return new Response(res.body, {
         status: res.status,
         headers: { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' },

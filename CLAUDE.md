@@ -20,6 +20,17 @@ Domain facts for agents working in this repo. User-facing documentation is in RE
 ## Platform facts (each one observed, with the date)
 
 - Twitch embeds need `parent=<hostname>` and refuse `file://`; they work on `localhost` and on HTTPS hosts.
+- Twitch ad-stitching rides on the playback token's playerType, not the viewer's IP: an anonymous GQL token
+  (`PlaybackAccessToken_Template`, public client-id `kimne78kx3ncx6brgo4mv6wki5h1ko`) with playerType `site`
+  gets a 30 s pre-roll stitched into the variant playlist (`CLASS="twitch-stitched-ad"` DATERANGE); `embed`,
+  `frontpage` and `mobile` came back clean from the same IP, and `embed` also clean through Cloudflare Worker
+  egress (`wrangler dev --remote`). That is why `/api/tw` mints an `embed` token and no proxy is needed
+  (2026-11-19). If ads return, the playerType constant in `src/worker.js` is the one line to change.
+- `usher.ttvnw.net` master playlists send no CORS header (the Worker relays them); variant playlists
+  (`*.playlist.ttvnw.net`) and segments (`*.cloudfront.hls.ttvnw.net`) send `*` (2026-11-19).
+- usher answers 404 `[{"error":"Can not find channel"}]` both for a missing channel and for an offline one;
+  check `stream: null` in GQL to tell them apart (monstercat itself was offline 2026-11-19).
+- pixeltris/TwitchAdSolutions is archived (2026-03-05); the maintained list is zGato/ScrewTwitchAds.
 - Kick's embed (`player.kick.com/<slug>`) has no window message listener, so it cannot be muted or
   controlled from outside (2026-11-18). It shows "This embed seems to be misconfigured" for a channel
   that does not exist and "<Name> is offline" for one that does.
