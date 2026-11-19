@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "multistream",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-18",
+  "assets": { "directory": "./public" },
+  "routes": [{ "pattern": "stream.spiot.to", "custom_domain": true }],
+  "workers_dev": false,
+  "observability": { "enabled": true }
+}

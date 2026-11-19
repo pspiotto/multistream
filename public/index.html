@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multistream</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #05060f; color: #dde; font: 14px system-ui, sans-serif; overflow: hidden; }
+  body { display: flex; }
+  #stage { position: relative; flex: 1; min-width: 0; }
+  #empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; color: #889; padding: 16px; }
+  .tile { position: absolute; transition: all .15s; outline: 1px solid #1c1f33; overflow: hidden; }
+  .tile.over { outline: 2px solid #8b5cf6; z-index: 1; }
+  .box { position: absolute; inset: 0; }
+  .note { position: absolute; inset: 0; margin: 0; display: grid; place-content: center; color: #889; }
+  iframe { width: 100%; height: 100%; border: 0; display: block; }
+  body.dragging iframe { pointer-events: none; }
+  body.dragging .tile { transition: none; }
+  .split { position: absolute; z-index: 1; touch-action: none; }
+  .split.v { cursor: col-resize; }
+  .split.h { cursor: row-resize; }
+  .split:hover, body.dragging .split:active { background: #8b5cf6; }
+  .pill, #bar { background: #0d0f1dee; border: 1px solid #2a2e4a; border-radius: 22px; display: flex; align-items: center; gap: 4px; padding: 4px 8px; }
+  .pill { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 8px); overflow-x: auto; white-space: nowrap; opacity: 0; transition: opacity .15s; }
+  .tile:hover .pill, .pill:focus-within, body.dragging .pill { opacity: 1; }
+  .grip { cursor: grab; touch-action: none; font-weight: 600; padding: 2px 6px; user-select: none; }
+  button, select, input { font: inherit; color: inherit; background: #171a2e; border: 1px solid #2a2e4a; border-radius: 999px; padding: 3px 10px; }
+  button { cursor: pointer; }
+  button:hover { background: #262a48; }
+  .tile.loud [data-a=sound], .tile.haschat [data-a=chat] { background: #6d43d9; border-color: #8b5cf6; }
+  #divider { width: 5px; cursor: col-resize; background: #1c1f33; touch-action: none; }
+  #chat { width: 340px; display: flex; flex-direction: column; }
+  #chat select { margin: 6px; }
+  #chat iframe { flex: 1; }
+  body.nochat #chat, body.nochat #divider { display: none; }
+  #bar { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 2; padding: 6px 10px; flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100% - 16px); opacity: .25; transition: opacity .15s; }
+  #bar:hover, #bar:focus-within, body.none #bar { opacity: 1; }
+  body.min #bar > :not(#menuBtn) { display: none; }
+  #url { width: 220px; }
+  #msg { position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%); color: #f87171; z-index: 2; }
+  dialog { background: #0d0f1d; color: inherit; border: 1px solid #2a2e4a; border-radius: 16px; min-width: min(360px, 90vw); }
+  dialog::backdrop { background: #000a; }
+  dialog h2 { margin: 0 0 12px; font-size: 16px; }
+  #savedList { list-style: none; padding: 0; margin: 0 0 12px; }
+  #savedList:empty::after { content: 'Nothing saved yet.'; color: #889; }
+  #savedList li { display: flex; gap: 6px; margin-bottom: 6px; }
+  #savedList li button:first-child { flex: 1; text-align: left; }
+  dialog form { display: flex; gap: 6px; margin-top: 6px; }
+  #saveName { flex: 1; }
+  /* Touch screens have no hover, so the controls stay visible and get finger-sized. */
+  @media (hover: none) { .pill { opacity: .9; } #bar { opacity: 1; } }
+  @media (pointer: coarse) { button, select, input { padding: 8px 12px; } .grip { padding: 8px 6px; } }
+</style>
+</head>
+<body>
+<main id="stage"><div id="empty"><h1>No streams yet</h1><p>Paste a Twitch, Kick or YouTube URL below, or pick a platform and type a channel name.</p></div>
+<form id="bar">
+  <button type="button" id="menuBtn" aria-label="Show or hide the toolbar">Menu</button>
+  <select id="plat" aria-label="Platform for bare channel names">
+    <option value="t">Twitch</option><option value="k">Kick</option><option value="y">YouTube</option>
+  </select>
+  <input id="url" placeholder="URL or channel name" aria-label="Stream URL or channel name" autocomplete="off" autocapitalize="off">
+  <button>Add</button>
+  <button type="button" id="chatBtn">Chat</button>
+  <button type="button" id="muteBtn">Mute all</button>
+  <button type="button" id="savedBtn">Saved</button>
+  <button type="button" id="shareBtn">Share</button>
+  <button type="button" id="fsBtn">Fullscreen</button>
+  <button type="button" id="clearBtn">Clear</button>
+</form>
+<div id="msg" role="alert"></div>
+</main>
+<div id="divider" role="separator" aria-label="Resize chat"></div>
+<aside id="chat">
+  <select id="chatSel" aria-label="Stream shown in chat"></select>
+  <iframe id="chatFrame" title="Chat"></iframe>
+</aside>
+<dialog id="savedDlg" aria-labelledby="savedTitle">
+  <h2 id="savedTitle">Saved canvases</h2>
+  <ul id="savedList"></ul>
+  <form id="saveForm"><input id="saveName" placeholder="Name for the current canvas" aria-label="Name for the current canvas" required maxlength="40"><button>Save</button></form>
+  <form method="dialog"><button>Close</button></form>
+</dialog>
+<!-- Twitch's player API, used for mute control. If it is blocked, Twitch tiles fall back to plain iframes. -->
+<script src="https://player.twitch.tv/js/embed/v1.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const host = location.hostname;
+const NAMES = { t: 'Twitch', k: 'Kick', y: 'YouTube' };
+// YouTube ids: an 11-character video id, a UC... channel id, or an @handle (looked up when the tile starts).
+const VALID = { t: /^\w{2,25}$/, k: /^[\w-]{1,40}$/, y: /^([\w-]{11}|UC[\w-]{22}|@[\w.-]{3,30})$/ };
+const key = s => s.p + (s.chat ? 'c' : '') + ':' + s.id; // "t:name" is a stream, "tc:name" is its chat as a tile
+const label = s => `${NAMES[s.p]}: ${s.id}` + (s.chat ? ' chat' : '');
+const isYtChannel = s => s.p === 'y' && /^UC[\w-]{22}$/.test(s.id);
+
+// Everything that reaches an iframe src goes through here, so ids are validated once.
+function parse(text, dflt) {
+  const s = text.trim();
+  let m, p = dflt, id = s, chat = false;
+  if ((m = s.match(/twitch\.tv\/(\w+)/i))) [p, id] = ['t', m[1]];
+  else if ((m = s.match(/kick\.com\/(?:popout\/)?([\w-]+)/i))) [p, id] = ['k', m[1]];
+  else if ((m = s.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|live\/|embed\/|shorts\/))([\w-]{11})/i))) [p, id] = ['y', m[1]];
+  else if ((m = s.match(/youtube\.com\/channel\/(UC[\w-]{22})/i))) [p, id] = ['y', m[1]];
+  else if ((m = s.match(/youtube\.com\/(@[\w.-]+)/i) || s.match(/^(@[\w.-]+)$/))) [p, id] = ['y', m[1]];
+  else if ((m = s.match(/^([tky])(c?):(.+)$/))) [p, chat, id] = [m[1], !!m[2], m[3]];
+  else if (p === 'y' && !VALID.y.test(id)) id = '@' + id; // a bare name under YouTube is a handle
+  if (p !== 'y' || id[0] === '@') id = id.toLowerCase();
+  return VALID[p]?.test(id) ? { p, id, chat } : null;
+}
+
+// YouTube @handles become the live video id, or the channel id when nothing is live. null = not found.
+const ytCache = {};
+async function resolve(s) {
+  if (s.p !== 'y' || s.id[0] !== '@') return s;
+  const r = await (ytCache[s.id] ??= fetch('/api/yt?handle=' + s.id.slice(1)).then(r => r.ok ? r.json() : {}).catch(() => ({})));
+  const id = r.videoId || r.channelId;
+  return id ? { ...s, id } : null;
+}
+
+function videoUrl(s, muted) {
+  if (s.p === 't') return `https://player.twitch.tv/?channel=${s.id}&parent=${host}&muted=${muted}`;
+  if (s.p === 'k') return `https://player.kick.com/${s.id}?autoplay=true&muted=${muted}`;
+  const q = `autoplay=1&enablejsapi=1&mute=${+muted}`;
+  return isYtChannel(s) ? `https://www.youtube.com/embed/live_stream?channel=${s.id}&${q}` : `https://www.youtube.com/embed/${s.id}?${q}`;
+}
+function chatUrl(s) {
+  if (s.p === 't') return `https://www.twitch.tv/embed/${s.id}/chat?parent=${host}&darkpopout`;
+  if (s.p === 'k') return `https://kick.com/popout/${s.id}/chat`;
+  return isYtChannel(s) ? null : `https://www.youtube.com/live_chat?v=${s.id}&embed_domain=${host}&dark_theme=1`;
+}
+
+const cum = (a, i) => a.slice(0, i).reduce((x, y) => x + y, 0);
+
+// Grid that gives 16:9 tiles the most width; with a focused tile, the rest become a bottom strip.
+// sz holds what the user dragged: column and row weights, and the strip's share of the height (0 = auto).
+// Returns tile rects plus the draggable edges between them.
+function layout(n, W, H, focus, sz = { c: [], r: [], strip: 0 }) {
+  if (focus >= 0 && n > 1) {
+    const w = W / (n - 1), sh = sz.strip ? H * sz.strip : Math.min(H * .25, w * 9 / 16);
+    let j = 0;
+    return {
+      tiles: Array.from({ length: n }, (_, i) => i === focus ? [0, 0, W, H - sh] : [j++ * w, H - sh, w, sh]),
+      splits: [{ d: 'strip', i: 0, x: 0, y: H - sh }],
+    };
+  }
+  let cols = 1, best = 0;
+  for (let c = 1; c <= n; c++) {
+    const w = Math.min(W / c, H / Math.ceil(n / c) * 16 / 9);
+    if (w > best) { best = w; cols = c; }
+  }
+  const rows = Math.ceil(n / cols);
+  if (sz.c.length !== cols) sz.c = Array(cols).fill(1); // grid shape changed: dragged sizes no longer apply
+  if (sz.r.length !== rows) sz.r = Array(rows).fill(1);
+  const X = i => W * cum(sz.c, i) / cum(sz.c, cols), Y = i => H * cum(sz.r, i) / cum(sz.r, rows);
+  return {
+    tiles: Array.from({ length: n }, (_, i) => {
+      const c = i % cols, r = Math.floor(i / cols);
+      return [X(c), Y(r), X(c + 1) - X(c), Y(r + 1) - Y(r)];
+    }),
+    splits: [
+      ...Array.from({ length: cols - 1 }, (_, i) => ({ d: 'c', i, x: X(i + 1) })),
+      ...Array.from({ length: Math.max(0, rows - 1) }, (_, i) => ({ d: 'r', i, y: Y(i + 1) })),
+    ],
+  };
+}
+
+let streams = [], focusKey = null, soundKey = null; // soundKey: the one stream with sound, null = all muted
+const tiles = new Map(); // key -> element; tiles are positioned, never re-parented, so iframes do not reload
+const splits = []; // pooled edge handles; reused so the one being dragged survives a render
+const EDGE = matchMedia('(pointer: coarse)').matches ? 20 : 8; // px thickness of a draggable edge
+const store = (k, v) => { try { return v === undefined ? localStorage.getItem(k) : localStorage.setItem(k, v); } catch { return null; } };
+let sizes = { c: [], r: [], strip: 0 };
+try { Object.assign(sizes, JSON.parse(store('sizes'))); } catch {}
+
+function makeSplit() {
+  const el = document.createElement('div');
+  el.setAttribute('role', 'separator');
+  el.title = 'Drag to resize, double-click to reset';
+  el.onpointerdown = e => { el.setPointerCapture(e.pointerId); document.body.classList.add('dragging'); };
+  el.onpointermove = e => {
+    if (!el.hasPointerCapture(e.pointerId)) return;
+    const b = $('stage').getBoundingClientRect(), d = el.dataset.d, i = +el.dataset.i;
+    if (d === 'strip') sizes.strip = Math.max(.1, Math.min(.8, (b.bottom - e.clientY) / b.height));
+    else {
+      const a = d === 'c' ? sizes.c : sizes.r, [pos, len] = d === 'c' ? [e.clientX - b.left, b.width] : [e.clientY - b.top, b.height];
+      const all = cum(a, a.length), pair = a[i] + a[i + 1], min = Math.min(pair / 2, all * 100 / len); // 100px floor
+      a[i] = Math.max(min, Math.min(pair - min, pos / len * all - cum(a, i)));
+      a[i + 1] = pair - a[i];
+    }
+    render();
+  };
+  el.onpointerup = () => { document.body.classList.remove('dragging'); store('sizes', JSON.stringify(sizes)); };
+  el.ondblclick = () => { sizes = { c: [], r: [], strip: 0 }; store('sizes', ''); render(); };
+  $('stage').append(el);
+  return el;
+}
+
+function frame(src, title) {
+  const f = document.createElement('iframe');
+  f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
+  f.allowFullscreen = true;
+  f.title = title;
+  f.src = src;
+  return f;
+}
+
+function makeTile(s) {
+  const k = key(s), el = document.createElement('div');
+  el.className = 'tile';
+  el.dataset.key = k;
+  el.innerHTML = `<p class="note"></p><div class="box"></div>
+    <div class="pill"><span class="grip" title="Drag onto another stream to swap">:: </span>
+    <button data-a="sound" title="Make this the only stream with sound">Sound</button>
+    <button data-a="chat" title="Show this stream's chat as its own tile">Chat</button>
+    <button data-a="max">Max</button><button data-a="reload">Reload</button><button data-a="remove">Remove</button></div>`;
+  const [note, box] = el.children, grip = el.querySelector('.grip');
+  grip.append(label(s));
+  el.querySelector('[data-a=sound]').hidden = s.chat;
+  el.querySelector('[data-a=chat]').hidden = s.chat || isYtChannel(s);
+
+  // (Re)builds the player. el.mute(bool) is how setSound reaches it; el.cheap marks mutes that do not reload.
+  el.start = async () => {
+    box.replaceChildren();
+    note.textContent = 'Loading...';
+    el.mute = null;
+    const r = await resolve(s), muted = soundKey !== k;
+    note.textContent = '';
+    el.muted = muted;
+    if (!r) return void (note.textContent = `Could not find ${s.id} on YouTube.`);
+    if (s.chat) {
+      const u = chatUrl(r);
+      return void (u ? box.append(frame(u, label(s))) : note.textContent = 'No chat: this channel is not live.');
+    }
+    el.cheap = true;
+    if (s.p === 't' && window.Twitch?.Player) {
+      const pl = new Twitch.Player(box, { channel: s.id, parent: [host], muted, width: '100%', height: '100%' });
+      el.mute = m => pl.setMuted(m);
+      return;
+    }
+    const f = frame(videoUrl(r, muted), label(s));
+    if (s.p === 'y') el.mute = m => f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: m ? 'mute' : 'unMute', args: [] }), 'https://www.youtube.com');
+    else {
+      // shortcut: Kick has no player API, so muting reloads its player; switch to an API if Kick ships one
+      el.cheap = false;
+      el.mute = m => { f.src = videoUrl(r, m); };
+    }
+    box.append(f);
+  };
+  el.start();
+
+  el.onclick = e => {
+    const a = e.target.dataset.a;
+    if (a === 'sound') setSound(soundKey === k ? null : k);
+    if (a === 'chat') {
+      const c = { ...s, chat: true }, had = streams.some(x => key(x) === key(c));
+      streams = had ? streams.filter(x => key(x) !== key(c)) : [...streams, c];
+      render();
+    }
+    if (a === 'max') { focusKey = focusKey === k ? null : k; render(); }
+    if (a === 'reload') { delete ytCache[s.id]; el.start(); }
+    if (a === 'remove') { streams = streams.filter(x => key(x) !== k); render(); }
+  };
+  const target = e => document.elementFromPoint(e.clientX, e.clientY)?.closest('.tile');
+  const mark = t => tiles.forEach(x => x.classList.toggle('over', x === t && t !== el));
+  grip.onpointerdown = e => { grip.setPointerCapture(e.pointerId); document.body.classList.add('dragging'); };
+  grip.onpointermove = e => { if (grip.hasPointerCapture(e.pointerId)) mark(target(e)); };
+  grip.onpointerup = e => {
+    document.body.classList.remove('dragging');
+    mark(null);
+    const a = streams.findIndex(x => key(x) === k), b = streams.findIndex(x => key(x) === target(e)?.dataset.key);
+    if (b >= 0 && a !== b) { [streams[a], streams[b]] = [streams[b], streams[a]]; render(); }
+  };
+  $('stage').append(el);
+  return el;
+}
+
+// One stream has sound at a time. Players with an API are always told (the user may have changed them
+// by hand); Kick is only touched when its state changes, because that costs a reload.
+function setSound(k) {
+  soundKey = k;
+  for (const [tk, el] of tiles) {
+    const m = tk !== k;
+    if (el.mute && (el.cheap || el.muted !== m)) el.mute(m);
+    el.muted = m;
+    el.classList.toggle('loud', !m);
+  }
+}
+
+function render() {
+  const keys = streams.map(key);
+  for (const [k, el] of tiles) if (!keys.includes(k)) { el.remove(); tiles.delete(k); }
+  for (const s of streams) if (!tiles.has(key(s))) tiles.set(key(s), makeTile(s));
+  if (!keys.includes(focusKey)) focusKey = null;
+  if (!keys.includes(soundKey)) soundKey = null;
+  for (const s of streams) tiles.get(key(s)).classList.toggle('haschat', keys.includes(key({ ...s, chat: true })));
+
+  const stage = $('stage');
+  const W = stage.clientWidth, H = stage.clientHeight, L = layout(streams.length, W, H, keys.indexOf(focusKey), sizes);
+  L.tiles.forEach(([x, y, w, h], i) =>
+    Object.assign(tiles.get(keys[i]).style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' }));
+  while (splits.length < L.splits.length) splits.push(makeSplit());
+  splits.forEach((el, i) => {
+    const s = L.splits[i];
+    if ((el.hidden = !s)) return;
+    const v = s.d === 'c'; // vertical bar between columns, else horizontal bar between rows
+    Object.assign(el.dataset, { d: s.d, i: s.i });
+    el.className = 'split ' + (v ? 'v' : 'h');
+    el.setAttribute('aria-label', v ? `Resize columns ${s.i + 1} and ${s.i + 2}` : `Resize rows ${s.i + 1} and ${s.i + 2}`);
+    Object.assign(el.style, v ? { left: s.x - EDGE / 2 + 'px', top: 0, width: EDGE + 'px', height: H + 'px' }
+      : { left: 0, top: s.y - EDGE / 2 + 'px', width: W + 'px', height: EDGE + 'px' });
+  });
+  $('empty').hidden = streams.length > 0;
+  document.body.classList.toggle('none', !streams.length);
+
+  const sel = $('chatSel'), chats = streams.filter(s => !s.chat && !isYtChannel(s)), prev = sel.value;
+  sel.replaceChildren(...chats.map(s => new Option(label(s), key(s))));
+  if (chats.some(s => key(s) === prev)) sel.value = prev;
+  showChat();
+
+  const hash = keys.join(',');
+  if (location.hash.slice(1) !== hash) history.replaceState(null, '', hash ? '#' + hash : location.pathname);
+  store('streams', hash);
+}
+
+async function showChat() {
+  const k = $('chatSel').value, s = streams.find(x => key(x) === k);
+  const r = s && !document.body.classList.contains('nochat') && await resolve(s);
+  if ($('chatSel').value !== k) return; // the selection changed while a handle was being looked up
+  const want = (r && chatUrl(r)) || 'about:blank';
+  if ($('chatFrame').dataset.src !== want) $('chatFrame').src = $('chatFrame').dataset.src = want;
+}
+
+function load(hash) {
+  const seen = new Set();
+  streams = decodeURIComponent(hash).split(',').map(x => parse(x)).filter(s => s && !seen.has(key(s)) && seen.add(key(s)));
+  render();
+}
+
+// Saved canvases: name -> hash, kept in this browser only.
+const saved = () => { try { return JSON.parse(store('saved')) || {}; } catch { return {}; } };
+function drawSaved() {
+  const all = saved();
+  $('savedList').replaceChildren(...Object.keys(all).map(name => {
+    const li = document.createElement('li'), open = document.createElement('button'), del = document.createElement('button');
+    open.textContent = name;
+    open.onclick = () => { load(all[name]); $('savedDlg').close(); };
+    del.textContent = 'Delete';
+    del.setAttribute('aria-label', 'Delete ' + name);
+    del.onclick = () => { const a = saved(); delete a[name]; store('saved', JSON.stringify(a)); drawSaved(); };
+    li.append(open, del);
+    return li;
+  }));
+}
+$('savedBtn').onclick = () => { drawSaved(); $('savedDlg').showModal(); };
+$('saveForm').onsubmit = e => {
+  e.preventDefault();
+  store('saved', JSON.stringify({ ...saved(), [$('saveName').value.trim()]: streams.map(key).join(',') }));
+  $('saveName').value = '';
+  drawSaved();
+};
+
+$('bar').onsubmit = e => {
+  e.preventDefault();
+  const text = $('url').value, s = parse(text, $('plat').value);
+  $('msg').textContent = '';
+  if (!text.trim()) return;
+  if (!s) return void ($('msg').textContent = 'Could not read that as a stream.');
+  if (!streams.some(x => key(x) === key(s))) streams.push(s);
+  $('url').value = '';
+  render();
+};
+$('menuBtn').onclick = () => store('min', document.body.classList.toggle('min') ? '1' : '');
+$('chatSel').onchange = showChat;
+$('chatBtn').onclick = () => { store('nochat', document.body.classList.toggle('nochat') ? '1' : ''); render(); };
+$('muteBtn').onclick = () => setSound(null);
+$('shareBtn').onclick = () => navigator.clipboard.writeText(location.href).then(
+  () => { $('shareBtn').textContent = 'Copied'; setTimeout(() => $('shareBtn').textContent = 'Share', 1500); },
+  () => { $('msg').textContent = 'Copy the address bar; clipboard access was refused.'; });
+$('fsBtn').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.();
+$('clearBtn').onclick = () => { if (confirm('Remove all streams?')) { streams = []; render(); } };
+
+const div = $('divider');
+div.onpointerdown = e => { div.setPointerCapture(e.pointerId); document.body.classList.add('dragging'); };
+div.onpointermove = e => {
+  if (!div.hasPointerCapture(e.pointerId)) return;
+  $('chat').style.width = Math.max(200, Math.min(innerWidth - 200, innerWidth - e.clientX)) + 'px';
+  render();
+};
+div.onpointerup = () => { document.body.classList.remove('dragging'); store('chatW', $('chat').style.width); };
+
+addEventListener('resize', render);
+addEventListener('hashchange', () => load(location.hash.slice(1)));
+
+if (location.search.startsWith('?test')) {
+  const eq = (a, b) => console.assert(JSON.stringify(a) === JSON.stringify(b), JSON.stringify(a), '!=', JSON.stringify(b));
+  const S = (p, id, chat = false) => ({ p, id, chat });
+  eq(parse('https://www.twitch.tv/MonsterCat'), S('t', 'monstercat'));
+  eq(parse('kick.com/SomeOne'), S('k', 'someone'));
+  eq(parse('https://kick.com/popout/someone/chat'), S('k', 'someone'));
+  eq(parse('https://www.youtube.com/watch?t=5&v=jfKfPfyJRdk'), S('y', 'jfKfPfyJRdk'));
+  eq(parse('https://youtu.be/jfKfPfyJRdk'), S('y', 'jfKfPfyJRdk'));
+  eq(parse('youtube.com/channel/UCSJ4gkVC6NrvII8umztf0Ow'), S('y', 'UCSJ4gkVC6NrvII8umztf0Ow'));
+  eq(parse('https://www.youtube.com/@LofiGirl/live'), S('y', '@lofigirl'));
+  eq(parse('@LofiGirl', 't'), S('y', '@lofigirl'));
+  eq(parse('LofiGirl', 'y'), S('y', '@lofigirl'));
+  eq(parse('someone', 'k'), S('k', 'someone'));
+  eq(parse('k:someone'), S('k', 'someone'));
+  eq(parse('tc:monstercat'), S('t', 'monstercat', true));
+  eq(key(S('t', 'monstercat', true)), 'tc:monstercat');
+  eq(parse('someone'), null);
+  eq(parse('k:x"><script>'), null);
+  eq(chatUrl(S('y', 'UCSJ4gkVC6NrvII8umztf0Ow')), null);
+  eq(layout(4, 1600, 900, -1).tiles[3], [800, 450, 800, 450]);
+  eq(layout(3, 1600, 900, 0).tiles[0], [0, 0, 1600, 675]);
+  eq(layout(2, 2000, 900, -1, { c: [3, 1], r: [1], strip: 0 }).tiles[1], [1500, 0, 500, 900]);
+  eq(layout(3, 1600, 900, 0, { c: [], r: [], strip: .5 }).splits, [{ d: 'strip', i: 0, x: 0, y: 450 }]);
+  document.title = 'tests ran';
+}
+
+if (store('nochat')) document.body.classList.add('nochat');
+if (store('min')) document.body.classList.add('min');
+$('chat').style.width = store('chatW') || '';
+load(location.hash.slice(1) || store('streams') || '');
+</script>
+</body>
+</html>
