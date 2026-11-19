@@ -14,7 +14,7 @@ Domain facts for agents working in this repo. User-facing documentation is in RE
 - `layout()` is pure (given `sizes`) and is also used to draw the preset previews.
 - Per-tile player control goes through `el.mute(bool)` and `el.vol(0..1)`, set in `el.start()`.
   `el.cheap` is false when muting costs a reload (the iframe fallbacks).
-- Browser-only persistence: localStorage keys `streams`, `sizes`, `saved`, `layouts`, `nochat`, `chatW`,
+- Browser-only persistence: localStorage keys `streams`, `sizes`, `saved`, `favs`, `layouts`, `nochat`, `chatW`,
   `min`, `clean`.
 
 ## Platform facts (each one observed, with the date)

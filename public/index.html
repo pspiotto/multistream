@@ -59,6 +59,7 @@
   dialog h3 { margin: 20px 0 8px; font-size: 14px; color: #99a; }
   .list { list-style: none; padding: 0; margin: 0 0 12px; }
   .list:empty::after { content: 'Nothing saved yet.'; color: #889; }
+  #favList:empty::after { content: 'Press Fav on a stream to keep it here.'; }
   .list li { display: flex; gap: 6px; margin-bottom: 6px; }
   .list li button:first-child { flex: 1; text-align: left; }
   dialog form { display: flex; gap: 6px; margin-top: 6px; }
@@ -107,6 +108,8 @@
   <h2 id="savedTitle">Saved canvases</h2>
   <ul class="list"></ul>
   <form><input placeholder="Name for the current canvas" aria-label="Name for the current canvas" required maxlength="40"><button>Save</button></form>
+  <h3>Favorite streams</h3>
+  <ul class="list" id="favList"></ul>
   <form method="dialog"><button>Close</button></form>
 </dialog>
 <dialog id="layoutDlg" aria-labelledby="layoutTitle">
@@ -285,6 +288,7 @@ function makeTile(s) {
     <button data-a="sound" title="Make this the only stream with sound">Sound</button>
     <input data-a="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
     <button data-a="chat" title="Show this stream's chat as its own tile">Chat</button>
+    <button data-a="fav" title="Keep this stream under Saved, on this device" aria-pressed="${favs().includes(k)}">Fav</button>
     <button data-a="max">Max</button><button data-a="reload">Reload</button><button data-a="remove">Remove</button></div>`;
   const [note, box] = el.children, grip = el.querySelector('.grip');
   grip.append(label(s));
@@ -360,6 +364,11 @@ function makeTile(s) {
       const c = { ...s, chat: true }, had = streams.some(x => key(x) === key(c));
       streams = had ? streams.filter(x => key(x) !== key(c)) : [...streams, c];
       render();
+    }
+    if (a === 'fav') {
+      const f = favs(), on = !f.includes(k);
+      store('favs', JSON.stringify(on ? [...f, k] : f.filter(x => x !== k)));
+      e.target.setAttribute('aria-pressed', on);
     }
     if (a === 'max') { focusKey = focusKey === k ? null : k; render(); }
     if (a === 'reload') { delete ytCache[s.id]; el.start(); }
@@ -470,7 +479,26 @@ function saver(k, dlg, snapshot, open) {
 
 // Saved canvases: which streams are open.
 const drawSaved = saver('saved', $('savedDlg'), () => streams.map(key).join(','), load);
-$('savedBtn').onclick = () => { drawSaved(); $('savedDlg').showModal(); };
+$('savedBtn').onclick = () => { drawSaved(); drawFavs(); $('savedDlg').showModal(); };
+
+// Favorite streams: stream keys ("t:name") kept in this browser. Opening one adds it to the canvas.
+function favs() { try { return JSON.parse(store('favs')) || []; } catch { return []; } }
+function drawFavs() {
+  $('favList').replaceChildren(...favs().map(x => parse(x)).filter(Boolean).map(s => {
+    const k = key(s), li = document.createElement('li'), go = document.createElement('button'), del = document.createElement('button');
+    go.textContent = label(s);
+    go.onclick = () => { if (!streams.some(x => key(x) === k)) streams.push(s); render(); $('savedDlg').close(); };
+    del.textContent = 'Delete';
+    del.setAttribute('aria-label', 'Delete ' + label(s));
+    del.onclick = () => {
+      store('favs', JSON.stringify(favs().filter(x => x !== k)));
+      tiles.get(k)?.querySelector('[data-a=fav]').setAttribute('aria-pressed', false);
+      drawFavs();
+    };
+    li.append(go, del);
+    return li;
+  }));
+}
 
 // Layouts: how the streams are arranged, whatever they are.
 const PRESETS = [['Auto', { cols: 0 }], ['1 column', { cols: 1 }], ['2 columns', { cols: 2 }], ['3 columns', { cols: 3 }],
