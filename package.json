@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev --port 8080",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test": "node --test",
+    "verify": "node scripts/verify.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.165.0"

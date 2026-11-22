@@ -16,7 +16,22 @@
   html, body { height: 100%; margin: 0; background: #05060f; color: #dde; font: 14px system-ui, sans-serif; overflow: hidden; }
   body { display: flex; }
   #stage { position: relative; flex: 1; min-width: 0; }
-  #empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; color: #889; padding: 16px; }
+  /* Home: the favorites launcher. Shown over the stage when asked for, and whenever nothing is open. */
+  #home { position: absolute; inset: 0; z-index: 2; overflow: auto; background: #05060ff2; padding: 24px 16px 96px; display: grid; align-content: start; justify-items: center; gap: 12px; text-align: center; }
+  #home[hidden] { display: none; }
+  #home h1 { margin: 0; font-size: 24px; }
+  #home h2 { margin: 12px 0 0; font-size: 14px; color: #99a; }
+  #home p { margin: 0; color: #889; max-width: 560px; }
+  #home form, .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 900px; }
+  .chip { display: inline-flex; }
+  .chip button:first-child { border-radius: 999px 0 0 999px; display: inline-flex; align-items: center; gap: 6px; }
+  .chip button:last-child { border-radius: 0 999px 999px 0; border-left: 0; color: #889; padding-left: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #556; }
+  .dot.on { background: #22c55e; border-color: #22c55e; }
+  .dot.off { background: #334; }
+  #homeGo { font-size: 16px; padding: 8px 22px; background: #6d43d9; border-color: #8b5cf6; }
+  #homeGo:disabled { opacity: .4; cursor: default; }
+  #home .list { width: min(360px, 100%); }
   .tile { position: absolute; transition: all .15s; outline: 1px solid #1c1f33; overflow: hidden; }
   .tile.over { outline: 2px solid #8b5cf6; z-index: 1; }
   .box { position: absolute; inset: 0; }
@@ -29,6 +44,14 @@
   /* The volume slider belongs to the stream that has sound, and only where volume can be set. */
   [data-a=vol] { width: 80px; padding: 0; accent-color: #8b5cf6; }
   .tile:not(.loud) [data-a=vol], .tile.novol [data-a=vol] { display: none; }
+  /* Delay exists only where the stream plays in our own <video>. */
+  .delay { display: none; align-items: center; gap: 4px; }
+  .tile.own .delay { display: inline-flex; }
+  .delay input { width: 4.5em; padding-right: 2px; }
+  /* Says when a tile is not on the ad-free player: amber when the channel is live anyway, grey when offline. */
+  .badge { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid #b4530966; color: #fbbf24; cursor: help; }
+  .badge:empty { display: none; }
+  .tile.off .badge { color: #889; border-color: #2a2e4a; }
   body.dragging iframe { pointer-events: none; }
   body.dragging .tile { transition: none; }
   .split { position: absolute; z-index: 1; touch-action: none; }
@@ -48,11 +71,11 @@
   #chat select { margin: 6px; }
   #chat iframe { flex: 1; }
   body.nochat #chat, body.nochat #divider { display: none; }
-  #bar { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 2; padding: 6px 10px; flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100% - 16px); opacity: .25; transition: opacity .15s; }
+  #bar { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 3; padding: 6px 10px; flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100% - 16px); opacity: .25; transition: opacity .15s; }
   #bar:hover, #bar:focus-within, body.none #bar { opacity: 1; }
   body.min #bar > :not(#menuBtn) { display: none; }
   #url { width: 220px; }
-  #msg { position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%); color: #f87171; z-index: 2; }
+  #msg { position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%); color: #f87171; z-index: 3; }
   dialog { background: #0d0f1d; color: inherit; border: 1px solid #2a2e4a; border-radius: 16px; min-width: min(360px, 90vw); }
   dialog::backdrop { background: #000a; }
   dialog h2 { margin: 0 0 16px; font-size: 20px; }
@@ -64,10 +87,11 @@
   .list li button:first-child { flex: 1; text-align: left; }
   dialog form { display: flex; gap: 6px; margin-top: 6px; }
   dialog form input { flex: 1; }
-  #presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-  #presets button { border-radius: 12px; padding: 8px 4px; display: grid; justify-items: center; gap: 6px; font-size: 12px; }
-  #presets svg { width: 56px; height: auto; max-height: 48px; }
-  #presets rect { fill: #2a2e4a; stroke: #8b5cf6; vector-effect: non-scaling-stroke; }
+  .presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  #home .presets { grid-template-columns: repeat(auto-fit, 84px); justify-content: center; width: 100%; max-width: 700px; }
+  .presets button { border-radius: 12px; padding: 8px 4px; display: grid; justify-items: center; gap: 6px; font-size: 12px; }
+  .presets svg { width: 56px; height: auto; max-height: 48px; }
+  .presets rect { fill: #2a2e4a; stroke: #8b5cf6; vector-effect: non-scaling-stroke; }
   /* Touch screens have no hover, so the controls stay visible and get finger-sized. */
   @media (hover: none) {
     .pill { opacity: .9; }
@@ -77,12 +101,36 @@
     body.min #bar { opacity: .5; }
   }
   @media (pointer: coarse) { button, select, input { padding: 8px 12px; } .grip { padding: 8px 6px; } }
+  /* Phones upright: a 340px chat column would leave the streams almost no width, so chat goes underneath. */
+  @media (max-width: 640px) {
+    body { flex-direction: column; }
+    #stage { min-height: 0; }
+    #chat { width: auto !important; height: 45%; }
+    #divider { display: none; }
+  }
 </style>
 </head>
 <body>
-<main id="stage"><div id="empty"><h1>No streams yet</h1><p>Paste a Twitch, Kick or YouTube URL below, or pick a platform and type a channel name.</p></div>
+<main id="stage"><section id="home" aria-labelledby="homeTitle" hidden>
+  <h1 id="homeTitle">Multistream</h1>
+  <p>Pick the streams you want, pick a layout, press Watch. To open a single stream, paste its URL in the toolbar below.</p>
+  <div id="homeFavs"></div>
+  <form id="homeAdd">
+    <select id="homePlat" aria-label="Platform for bare channel names">
+      <option value="t">Twitch</option><option value="k">Kick</option><option value="y">YouTube</option>
+    </select>
+    <input id="homeUrl" placeholder="URL or channel name" aria-label="Favorite to add: URL or channel name" autocomplete="off" autocapitalize="off">
+    <button>Add favorite</button>
+  </form>
+  <h2>Layout</h2>
+  <div id="homeLay" class="presets"></div>
+  <button type="button" id="homeGo">Watch</button>
+  <h2 id="homeSavedTitle">Saved canvases</h2>
+  <ul class="list" id="homeSaved"></ul>
+</section>
 <form id="bar">
   <button type="button" id="menuBtn" aria-label="Show or hide the toolbar">Menu</button>
+  <button type="button" id="homeBtn" aria-pressed="false" title="Favorites, layouts and saved canvases (H)">Home</button>
   <select id="plat" aria-label="Platform for bare channel names">
     <option value="t">Twitch</option><option value="k">Kick</option><option value="y">YouTube</option>
   </select>
@@ -114,7 +162,7 @@
 </dialog>
 <dialog id="layoutDlg" aria-labelledby="layoutTitle">
   <h2 id="layoutTitle">Layout</h2>
-  <div id="presets"></div>
+  <div id="presets" class="presets"></div>
   <h3>Custom</h3>
   <ul class="list"></ul>
   <form><input placeholder="Name for the current layout" aria-label="Name for the current layout" required maxlength="40"><button>Save</button></form>
@@ -134,7 +182,9 @@ const isYtChannel = s => s.p === 'y' && /^UC[\w-]{22}$/.test(s.id);
 function parse(text, dflt) {
   const s = text.trim();
   let m, p = dflt, id = s, chat = false;
-  if ((m = s.match(/twitch\.tv\/(\w+)/i))) [p, id] = ['t', m[1]];
+  // Addresses on these sites that are not a channel (a recording, a clip, a listing) are refused, not guessed at.
+  if (/clips\.twitch\.tv|twitch\.tv\/(?:videos|directory|settings|downloads|search)(?=[/?#]|$)|kick\.com\/(?:video|category|categories|browse)(?=[/?#]|$)/i.test(s)) return null;
+  if ((m = s.match(/twitch\.tv\/\?(?:.*&)?channel=(\w+)/i) || s.match(/twitch\.tv\/(?:(?:popout|embed|moderator)\/)?(\w+)/i))) [p, id] = ['t', m[1]];
   else if ((m = s.match(/kick\.com\/(?:popout\/)?([\w-]+)/i))) [p, id] = ['k', m[1]];
   else if ((m = s.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|live\/|embed\/|shorts\/))([\w-]{11})/i))) [p, id] = ['y', m[1]];
   else if ((m = s.match(/youtube\.com\/channel\/(UC[\w-]{22})/i))) [p, id] = ['y', m[1]];
@@ -145,13 +195,31 @@ function parse(text, dflt) {
   return VALID[p]?.test(id) ? { p, id, chat } : null;
 }
 
-// YouTube @handles become the live video id, or the channel id when nothing is live. null = not found.
+// What /api/yt knows about a YouTube id: { videoId, channelId, handle, live }, or {} when the lookup fails.
+const ytInfo = id => fetch('/api/yt?' + (id[0] === '@' ? 'handle=' + id.slice(1) : (/^UC[\w-]{22}$/.test(id) ? 'channel=' : 'video=') + id))
+  .then(r => r.ok ? r.json() : {}).catch(() => ({}));
+// YouTube @handles and channel ids become the live video id, or the channel id when nothing is live.
+// null = not found. Cached until the tile is reloaded or its channel starts a new stream.
 const ytCache = {};
 async function resolve(s) {
-  if (s.p !== 'y' || s.id[0] !== '@') return s;
-  const r = await (ytCache[s.id] ??= fetch('/api/yt?handle=' + s.id.slice(1)).then(r => r.ok ? r.json() : {}).catch(() => ({})));
-  const id = r.videoId || r.channelId;
+  if (s.p !== 'y' || /^[\w-]{11}$/.test(s.id)) return s;
+  const r = await (ytCache[s.id] ??= ytInfo(s.id));
+  const id = r.videoId || r.channelId || (isYtChannel(s) ? s.id : null);
   return id ? { ...s, id } : null;
+}
+// Every YouTube stream gets a new video id, so a pasted link to one is dead by the next stream. When
+// the pasted video is what its channel is live with right now, keep the channel instead: the tile,
+// the address, favorites and saved canvases then follow the channel from stream to stream.
+// A channel with several streams live at once keeps the pasted video, since the channel names only one.
+// The test is the channel's own answer (is this the video it is live with?), not the video page's live
+// flag: that page reaches the Worker stripped about one time in four, without flag or handle. A second
+// request usually gets the full page, and with it the handle instead of the bare channel id.
+async function durable(s) {
+  if (s.p !== 'y' || s.chat || !/^[\w-]{11}$/.test(s.id)) return s;
+  let v = await ytInfo(s.id);
+  if (!v.handle) v = { ...v, ...await ytInfo(s.id) };
+  const c = (v.handle || v.channelId) && parse('y:' + (v.handle ? '@' + v.handle : v.channelId));
+  return c && (await (ytCache[c.id] ??= ytInfo(c.id))).videoId === s.id ? c : s;
 }
 
 // Kick and Twitch streams play in a plain <video> of ours. Browsers that play HLS themselves (Safari, every
@@ -174,8 +242,20 @@ const loadHls = () => hlsLib ??= new Promise(done => {
 probe.volume = .5;
 const CANVOL = probe.volume === .5; // iOS ignores volume set from a page; only the hardware buttons work
 // shortcut: Kick's unofficial channel API, breaks if they change or lock it; any failure falls back to the embed
-const kickHls = id => fetch(`https://kick.com/api/v2/channels/${id}`).then(r => r.ok ? r.json() : null)
-  .then(j => j?.livestream && /^https:\/\//.test(j.playback_url) ? j.playback_url : null).catch(() => null);
+// { live, url }: live is null when the lookup itself failed, url is the HLS playlist of a live channel.
+const kick = id => fetch(`https://kick.com/api/v2/channels/${id}`).then(r => r.ok ? r.json() : r.status === 404 ? {} : null)
+  .then(j => j ? { live: !!j.livestream, url: j.livestream && /^https:\/\//.test(j.playback_url) ? j.playback_url : null } : { live: null })
+  .catch(() => ({ live: null }));
+// Which of these streams are live: Map of key -> true, false, or null when it could not be checked.
+// Twitch channels go in one request; Kick and YouTube are asked one by one.
+async function lives(list) {
+  const out = new Map(), tw = list.filter(s => s.p === 't').map(s => s.id);
+  const jobs = list.filter(s => s.p !== 't').map(async s => out.set(key(s), (s.p === 'k' ? await kick(s.id) : await ytInfo(s.id)).live ?? null));
+  if (tw.length) jobs.push(fetch('/api/live?t=' + tw.join(',')).then(r => r.ok ? r.json() : {}).catch(() => ({}))
+    .then(j => tw.forEach(id => out.set('t:' + id, j[id] ?? null))));
+  await Promise.all(jobs);
+  return out;
+}
 
 function videoUrl(s, muted) {
   if (s.p === 't') return `https://player.twitch.tv/?channel=${s.id}&parent=${host}&muted=${muted}`;
@@ -246,6 +326,8 @@ const store = (k, v) => { try { return v === undefined ? localStorage.getItem(k)
 const sizes = { c: [], r: [], strip: 0, cols: 0, side: 'bottom' }; // the layout() settings in use
 try { Object.assign(sizes, JSON.parse(store('sizes'))); } catch {}
 const saveSizes = () => store('sizes', JSON.stringify(sizes));
+const vols = () => { try { return JSON.parse(store('vols')) || {}; } catch { return {}; } }; // key -> volume last set
+const OFFLINE = 'Not live right now. The stream starts here by itself when the channel goes live.';
 
 function makeSplit() {
   const el = document.createElement('div');
@@ -284,85 +366,161 @@ function makeTile(s) {
   el.className = 'tile' + (s.chat ? ' chat' : '');
   el.dataset.key = k;
   el.innerHTML = `<p class="note"></p><div class="box"></div><div class="shield"></div>
-    <div class="pill"><span class="grip" title="Drag onto another stream to swap">:: </span>
+    <div class="pill"><span class="grip" title="Drag onto another stream to swap">:: </span><span class="badge"></span>
     <button data-a="sound" title="Make this the only stream with sound">Sound</button>
-    <input data-a="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+    <input data-a="vol" type="range" min="0" max="1" step="0.05" aria-label="Volume">
+    <label class="delay" title="Hold this stream back by this many seconds, to line it up with another view of the same event">Delay
+      <input data-a="delay" type="number" min="0" max="30" step="1" value="0"></label>
     <button data-a="chat" title="Show this stream's chat as its own tile">Chat</button>
-    <button data-a="fav" title="Keep this stream under Saved, on this device" aria-pressed="${favs().includes(k)}">Fav</button>
+    <button data-a="fav" title="Keep this stream on the home page, on this device" aria-pressed="${favs().includes(k)}">Fav</button>
     <button data-a="max">Max</button><button data-a="reload">Reload</button><button data-a="remove">Remove</button></div>`;
-  const [note, box] = el.children, grip = el.querySelector('.grip');
+  const [note, box, shield] = el.children, grip = el.querySelector('.grip'), badge = el.querySelector('.badge');
+  const volIn = el.querySelector('[data-a=vol]'), delayIn = el.querySelector('[data-a=delay]');
   grip.append(label(s));
+  volIn.value = vols()[k] ?? 1;
   el.querySelector('[data-a=sound]').hidden = s.chat;
-  el.querySelector('[data-a=chat]').hidden = s.chat || isYtChannel(s);
+  el.querySelector('[data-a=chat]').hidden = s.chat;
+  el.tag = (text, why) => { badge.textContent = text; badge.title = why; el.classList.toggle('off', text === 'Offline'); };
+
+  // Ends whatever is playing. A <video> taken out of the page would otherwise keep downloading.
+  const drop = () => {
+    el.hls?.destroy();
+    el.hls = null;
+    clearInterval(el.tick);
+    clearTimeout(el.holdT);
+    const v = box.querySelector('video');
+    if (v) { v.pause(); v.removeAttribute('src'); v.load(); }
+  };
+  // el.gen changes whenever the tile is stopped or restarted, so a start() still waiting on a lookup
+  // can tell it has been overtaken and must not build a player.
+  el.stop = () => { el.gen = (el.gen || 0) + 1; drop(); };
 
   // (Re)builds the player. el.mute(bool) is how setSound reaches it; el.cheap marks mutes that do not reload.
+  // el.watch marks tiles the poll below should look at, to start them when their channel goes live.
   el.start = async () => {
-    el.hls?.destroy(); // stop a previous hls.js player's downloads before rebuilding
-    el.hls = null;
+    el.stop();
+    const gen = el.gen, stale = () => gen !== el.gen;
     box.replaceChildren();
     note.textContent = 'Loading...';
-    el.mute = null;
-    const r = await resolve(s), muted = soundKey !== k;
+    el.mute = el.vol = el.setDelay = null;
+    el.watch = el.wasOff = false;
+    el.classList.remove('own');
+    el.tag('', '');
+    delayIn.value = 0;
+    const r = await resolve(s);
+    if (stale()) return;
     note.textContent = '';
-    el.muted = muted;
+    el.muted = soundKey !== k;
     if (!r) return void (note.textContent = `Could not find ${s.id} on YouTube.`);
     if (s.chat) {
       const u = chatUrl(r);
       return void (u ? box.append(frame(u, label(s))) : note.textContent = 'No chat: this channel is not live.');
     }
     el.cheap = true;
-    el.vol = null; // el.vol(0..1) exists where the player lets us set volume
-    const embed = () => {
+    // The platform's own player. For YouTube it is the only one. For Twitch and Kick it is the fallback,
+    // and `why` says what for: 'offline', or what went wrong while the channel is live.
+    const embed = why => {
+      if (stale()) return;
+      drop();
+      el.classList.remove('own');
+      el.setDelay = null;
       const f = frame(videoUrl(r, soundKey !== k), label(s));
       if (s.p === 'y') {
         const cmd = (func, ...args) => f.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), 'https://www.youtube.com');
         el.mute = m => cmd(m ? 'mute' : 'unMute');
         el.vol = x => cmd('setVolume', x * 100);
+        el.vid = r.id;
+        el.watch = s.id !== r.id || isYtChannel(s); // a handle or a channel id: its next stream has another video id
+        if (isYtChannel(r)) el.tag('Offline', OFFLINE);
       } else {
         // shortcut: Kick's and Twitch's embeds take no commands, so muting reloads them
         el.cheap = false;
         el.vol = null;
         el.mute = m => { f.src = videoUrl(r, m); };
+        el.watch = true;
+        el.wasOff = why === 'offline';
+        if (el.wasOff) el.tag('Offline', OFFLINE);
+        else el.tag('Embed', `Playing in ${NAMES[s.p]}'s own player because ${why}. Ads are possible and switching sound reloads it. Reload tries the ad-free player again.`);
       }
       box.replaceChildren(f);
       el.classList.toggle('novol', !el.vol || !CANVOL);
     };
-    if (s.p === 'k' || s.p === 't') {
-      // Our own <video> instead of the platform's embed: sound switches without a reload, and at full
-      // quality. Kick's playback URL comes from its channel API; Twitch's playlist is our /api/tw,
-      // which comes with an ad-free token. Any failure on the way (offline, lookup blocked, hls.js
-      // missing, playback error) falls back to the platform's embed, ads and all.
-      const src = s.p === 'k'
-        ? await kickHls(s.id).then(u => u && '/api/hls?u=' + encodeURIComponent(u))
-        : '/api/tw?c=' + s.id;
-      const Hls = src && !NATIVE_HLS && await loadHls();
-      if (!src || !(NATIVE_HLS || Hls)) return embed();
-      const v = document.createElement('video');
-      Object.assign(v, { autoplay: true, playsInline: true, controls: true, muted: soundKey !== k, title: label(s) });
-      if (Hls) {
+    if (s.p === 'y') return embed();
+
+    // Twitch and Kick: our own <video> instead of the platform's embed, so sound switches without a
+    // reload, and at full quality. Kick's playback URL comes from its channel API; Twitch's playlist
+    // is our /api/tw, which comes with an ad-free token. An offline channel, or any failure on the
+    // way (lookup blocked, hls.js missing, playback error), falls back to the platform's embed.
+    const st = s.p === 'k' ? await kick(s.id) : { live: (await lives([s])).get(k) };
+    if (stale()) return;
+    if (st.live === false) return embed('offline');
+    const src = s.p === 't' ? '/api/tw?c=' + s.id : st.url && '/api/hls?u=' + encodeURIComponent(st.url);
+    if (!src) return embed('its stream address could not be looked up');
+    const Hls = !NATIVE_HLS && await loadHls();
+    if (stale()) return;
+    if (!NATIVE_HLS && !Hls) return embed('this browser cannot play the stream directly');
+    const v = document.createElement('video');
+    Object.assign(v, { autoplay: true, playsInline: true, controls: true, muted: soundKey !== k, volume: +volIn.value, title: label(s) });
+    box.replaceChildren(v);
+    // A hiccup gets two more tries before the tile gives up on the ad-free player; playing again resets the count.
+    let tries = 0, steady = 0;
+    v.addEventListener('playing', () => { tries = 0; steady = Date.now(); });
+    if (Hls) {
+      const h = el.hls = new Hls({
+        capLevelToPlayerSize: true, // a small tile does not download source quality
         // Twitch's variant playlists refuse our Origin (403), so hls.js reads them through /api/tw.
         // Segments allow any origin and still load directly.
-        const h = el.hls = new Hls(s.p !== 't' ? {} : {
-          xhrSetup(xhr, u) {
-            if (/^https:\/\/[a-z0-9-]+\.playlist\.ttvnw\.net\//.test(u)) xhr.open('GET', '/api/tw?v=' + encodeURIComponent(u), true);
-          },
-        });
-        h.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { h.destroy(); el.hls = null; embed(); } });
-        h.loadSource(src);
-        h.attachMedia(v);
-      } else {
-        v.src = src;
-        v.onerror = embed;
-      }
-      el.mute = m => { v.muted = m; };
-      el.vol = x => { v.volume = x; };
-      box.replaceChildren(v);
-    } else return embed();
+        ...(s.p === 't' && { xhrSetup(xhr, u) {
+          if (/^https:\/\/[a-z0-9-]+\.playlist\.ttvnw\.net\//.test(u)) xhr.open('GET', '/api/tw?v=' + encodeURIComponent(u), true);
+        } }),
+      });
+      h.on(Hls.Events.ERROR, (_, d) => {
+        if (!d.fatal || stale()) return;
+        if (d.details === 'manifestLoadError' || tries++ >= 2) return embed('playback failed'); // no playlist at all is not a hiccup
+        d.type === 'mediaError' ? h.recoverMediaError() : h.startLoad();
+      });
+      h.loadSource(src);
+      h.attachMedia(v);
+    } else {
+      v.src = src;
+      v.onerror = () => {
+        if (stale()) return;
+        if (!v.currentTime || tries++ >= 2) return embed('playback failed');
+        v.src = src; // asks for the playlist again, which for Twitch also means a fresh token
+      };
+    }
+    el.mute = m => { v.muted = m; };
+    el.vol = x => { v.volume = x; };
+    el.classList.add('own');
     el.classList.toggle('novol', !CANVOL);
+
+    // Staying live. `base` is how far behind the newest video this player chose to sit once it had
+    // played 20 s without stalling. Stalls and pauses push it further back; 20 s beyond base (plus the
+    // Delay asked for) it jumps forward to base again, at most once a minute. If a jump is followed by
+    // a stall, the estimate was wrong for this player and the tile stops jumping until it is reloaded.
+    let base = null, jumped = 0, holdEnd = 0;
+    el.delay = 0;
+    v.addEventListener('waiting', () => { steady = 0; if (Date.now() - jumped < 15000) clearInterval(el.tick); });
+    el.tick = setInterval(() => {
+      const t = v.seekable, lag = t.length ? t.end(t.length - 1) - v.currentTime - el.delay : NaN;
+      if (v.paused || !steady || !isFinite(lag)) return;
+      if (base === null) { if (Date.now() - steady > 20000) base = lag; return; }
+      if (lag - base > 20 && Date.now() - jumped > 60000) { v.currentTime += lag - base; jumped = Date.now(); }
+    }, 5000);
+    // Delay: pausing for the extra seconds puts the stream that far behind; less delay skips forward.
+    el.setDelay = d => {
+      const now = Date.now(), owed = Math.max(0, holdEnd - now) / 1000 + d - el.delay; // pause still to serve, plus the change
+      el.delay = d;
+      clearTimeout(el.holdT);
+      holdEnd = now + Math.max(0, owed) * 1000;
+      if (owed > 0) { v.pause(); el.holdT = setTimeout(() => v.play().catch(() => {}), owed * 1000); }
+      else { if (owed < 0) v.currentTime -= owed; v.play().catch(() => {}); }
+    };
   };
   el.start();
 
-  el.querySelector('[data-a=vol]').oninput = e => el.vol?.(+e.target.value);
+  volIn.oninput = () => { el.vol?.(+volIn.value); store('vols', JSON.stringify({ ...vols(), [k]: +volIn.value })); };
+  delayIn.onchange = () => el.setDelay?.(delayIn.value = Math.max(0, Math.min(30, Math.round(+delayIn.value) || 0)));
   el.onclick = e => {
     const a = e.target.dataset.a;
     if (a === 'sound') setSound(soundKey === k ? null : k);
@@ -371,15 +529,16 @@ function makeTile(s) {
       streams = had ? streams.filter(x => key(x) !== key(c)) : [...streams, c];
       render();
     }
-    if (a === 'fav') {
-      const f = favs(), on = !f.includes(k);
-      store('favs', JSON.stringify(on ? [...f, k] : f.filter(x => x !== k)));
-      e.target.setAttribute('aria-pressed', on);
-    }
+    if (a === 'fav') setFav(k, !favs().includes(k));
     if (a === 'max') { focusKey = focusKey === k ? null : k; render(); }
     if (a === 'reload') { delete ytCache[s.id]; el.start(); }
     if (a === 'remove') { streams = streams.filter(x => key(x) !== k); render(); }
   };
+  // With "Hide overlays" on, the sheet over the player takes the clicks: one for sound, two for Max.
+  // The single click waits a moment so a double-click does not also switch the sound twice.
+  let clickT;
+  shield.onclick = () => { clearTimeout(clickT); clickT = setTimeout(() => setSound(soundKey === k ? null : k), 250); };
+  shield.ondblclick = () => { clearTimeout(clickT); focusKey = focusKey === k ? null : k; render(); };
   const target = e => document.elementFromPoint(e.clientX, e.clientY)?.closest('.tile');
   const mark = t => tiles.forEach(x => x.classList.toggle('over', x === t && t !== el));
   grip.onpointerdown = e => { grip.setPointerCapture(e.pointerId); document.body.classList.add('dragging'); };
@@ -401,6 +560,7 @@ function setSound(k) {
   for (const [tk, el] of tiles) {
     const m = tk !== k;
     if (el.mute && (el.cheap || el.muted !== m)) el.mute(m);
+    if (!m) el.vol?.(+el.querySelector('[data-a=vol]').value); // the volume this stream was left at
     el.muted = m;
     el.classList.toggle('loud', !m);
   }
@@ -408,7 +568,7 @@ function setSound(k) {
 
 function render() {
   const keys = streams.map(key);
-  for (const [k, el] of tiles) if (!keys.includes(k)) { el.hls?.destroy(); el.remove(); tiles.delete(k); }
+  for (const [k, el] of tiles) if (!keys.includes(k)) { el.stop(); el.remove(); tiles.delete(k); }
   for (const s of streams) if (!tiles.has(key(s))) tiles.set(key(s), makeTile(s));
   if (!keys.includes(focusKey)) focusKey = null;
   if (!keys.includes(soundKey)) soundKey = null;
@@ -429,10 +589,12 @@ function render() {
     Object.assign(el.style, v ? { left: s.x - EDGE / 2 + 'px', top: 0, width: EDGE + 'px', height: H + 'px' }
       : { left: 0, top: s.y - EDGE / 2 + 'px', width: W + 'px', height: EDGE + 'px' });
   });
-  $('empty').hidden = streams.length > 0;
   document.body.classList.toggle('none', !streams.length);
+  const home = !streams.length || document.body.classList.contains('home'); // nothing open: home is the page
+  $('homeBtn').setAttribute('aria-pressed', home);
+  if ($('home').hidden === home) { $('home').hidden = !home; if (home) drawHome(); }
 
-  const sel = $('chatSel'), chats = streams.filter(s => !s.chat && !isYtChannel(s)), prev = sel.value;
+  const sel = $('chatSel'), chats = streams.filter(s => !s.chat), prev = sel.value;
   sel.replaceChildren(...chats.map(s => new Option(label(s), key(s))));
   if (chats.some(s => key(s) === prev)) sel.value = prev;
   showChat();
@@ -450,9 +612,28 @@ async function showChat() {
   if ($('chatFrame').dataset.src !== want) $('chatFrame').src = $('chatFrame').dataset.src = want;
 }
 
+// A link from Share ends in a layout item: "l:3" is a 3-column grid (0 = auto), "l:r1" and "l:b1" are
+// the second stream big with the rest on the right or below. Returns what to put in `sizes`, or null.
+function readLay(x) {
+  const m = x.match(/^l:(?:(\d)|([br])(\d{1,2}))$/);
+  return m && (m[1] ? { cols: +m[1], focus: -1 } : { side: m[2] === 'r' ? 'right' : 'bottom', focus: +m[3] });
+}
+const layItem = () => {
+  const i = streams.map(key).indexOf(focusKey);
+  return 'l:' + (i >= 0 && streams.length > 1 ? (sizes.side === 'right' ? 'r' : 'b') + i : Math.min(9, sizes.cols || 0));
+};
+
 function load(hash) {
   const seen = new Set();
-  streams = decodeURIComponent(hash).split(',').map(x => parse(x)).filter(s => s && !seen.has(key(s)) && seen.add(key(s)));
+  let lay;
+  try { hash = decodeURIComponent(hash); } catch {} // a stray % in a hand-typed address: read it as it stands
+  streams = hash.split(',').map(x => (lay = readLay(x) ?? lay, parse(x))).filter(s => s && !seen.has(key(s)) && seen.add(key(s)));
+  if (lay) {
+    const { focus, ...p } = lay;
+    Object.assign(sizes, { c: [], r: [], strip: 0 }, p);
+    focusKey = streams[focus] ? key(streams[focus]) : null;
+    saveSizes();
+  }
   render();
 }
 
@@ -487,20 +668,22 @@ function saver(k, dlg, snapshot, open) {
 const drawSaved = saver('saved', $('savedDlg'), () => streams.map(key).join(','), load);
 $('savedBtn').onclick = () => { drawSaved(); drawFavs(); $('savedDlg').showModal(); };
 
-// Favorite streams: stream keys ("t:name") kept in this browser. Opening one adds it to the canvas.
+// Favorite streams: stream keys ("t:name") kept in this browser. The home page is built from them.
 function favs() { try { return JSON.parse(store('favs')) || []; } catch { return []; } }
+const favList = () => favs().map(x => parse(x)).filter(Boolean);
+function setFav(k, on) {
+  const f = favs().filter(x => x !== k);
+  store('favs', JSON.stringify(on ? [...f, k] : f));
+  tiles.get(k)?.querySelector('[data-a=fav]').setAttribute('aria-pressed', on);
+}
 function drawFavs() {
-  $('favList').replaceChildren(...favs().map(x => parse(x)).filter(Boolean).map(s => {
+  $('favList').replaceChildren(...favList().map(s => {
     const k = key(s), li = document.createElement('li'), go = document.createElement('button'), del = document.createElement('button');
     go.textContent = label(s);
     go.onclick = () => { if (!streams.some(x => key(x) === k)) streams.push(s); render(); $('savedDlg').close(); };
     del.textContent = 'Delete';
     del.setAttribute('aria-label', 'Delete ' + label(s));
-    del.onclick = () => {
-      store('favs', JSON.stringify(favs().filter(x => x !== k)));
-      tiles.get(k)?.querySelector('[data-a=fav]').setAttribute('aria-pressed', false);
-      drawFavs();
-    };
+    del.onclick = () => { setFav(k, false); drawFavs(); };
     li.append(go, del);
     return li;
   }));
@@ -515,15 +698,17 @@ function applyLayout(p) { // p has cols for a grid, or side for one big stream p
   saveSizes();
   render();
 }
-function drawPresets() { // each button previews the result for the streams open now (4 when there are none)
-  const n = streams.length || 4, W = $('stage').clientWidth, H = $('stage').clientHeight, pad = W / 50;
-  $('presets').replaceChildren(...PRESETS.map(([name, p]) => {
+// Each button previews the result for n streams. `current` is the preset shown as chosen, if any.
+function drawPresets(into, n, pick, current) {
+  const W = $('stage').clientWidth, H = $('stage').clientHeight, pad = W / 50;
+  into.replaceChildren(...PRESETS.map(([name, p]) => {
     const b = document.createElement('button');
     b.type = 'button';
+    if (current !== undefined) b.setAttribute('aria-pressed', current === p);
     b.innerHTML = `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true">${layout(n, W, H, p.side ? 0 : -1, { ...p }).tiles.map(([x, y, w, h]) =>
       `<rect x="${x + pad}" y="${y + pad}" width="${Math.max(1, w - 2 * pad)}" height="${Math.max(1, h - 2 * pad)}" rx="${pad}"/>`).join('')}</svg>`;
     b.append(name);
-    b.onclick = () => { applyLayout(p); $('layoutDlg').close(); };
+    b.onclick = () => pick(p);
     return b;
   }));
 }
@@ -537,7 +722,140 @@ const drawLayouts = saver('layouts', $('layoutDlg'),
     saveSizes();
     render();
   });
-$('layoutBtn').onclick = () => { drawPresets(); drawLayouts(); $('layoutDlg').showModal(); };
+$('layoutBtn').onclick = () => {
+  drawPresets($('presets'), streams.length || 4, p => { applyLayout(p); $('layoutDlg').close(); });
+  drawLayouts();
+  $('layoutDlg').showModal();
+};
+
+// Home: every favorite, grouped by platform, each with a dot that says whether it is live. Picking
+// some and pressing Watch opens them in the chosen layout. `pick` starts as the favorites already open,
+// so unpicking one closes it; streams that are not favorites are left alone.
+let pick = new Set(), homeLay = null, liveMap = new Map();
+const homeResult = () => {
+  const f = favs(), out = streams.filter(s => !f.includes(key(s)) || pick.has(key(s)));
+  for (const k of pick) if (!out.some(s => key(s) === k)) out.push(parse(k));
+  return out.filter(Boolean);
+};
+function drawHome() {
+  pick = new Set(favs().filter(k => tiles.has(k)));
+  homeLay = null;
+  paintHome();
+  homeDots();
+  let all = {};
+  try { all = JSON.parse(store('saved')) || {}; } catch {}
+  $('homeSaved').replaceChildren(...Object.keys(all).map(name => {
+    const li = document.createElement('li'), go = document.createElement('button');
+    go.textContent = name;
+    go.onclick = () => { document.body.classList.remove('home'); load(all[name]); };
+    li.append(go);
+    return li;
+  }));
+}
+function paintHome() {
+  const list = favList();
+  $('homeFavs').replaceChildren(...Object.keys(NAMES).filter(p => list.some(s => s.p === p)).map(p => {
+    const sec = document.createElement('div'), h = document.createElement('h2'), row = document.createElement('div');
+    h.textContent = NAMES[p];
+    row.className = 'chips';
+    row.append(...list.filter(s => s.p === p).map(s => {
+      const k = key(s), chip = document.createElement('span'), go = document.createElement('button'), del = document.createElement('button');
+      chip.className = 'chip';
+      go.type = del.type = 'button';
+      go.dataset.k = k;
+      go.setAttribute('aria-pressed', pick.has(k));
+      if (!s.chat) go.append(Object.assign(document.createElement('span'), { className: 'dot' }));
+      go.append(s.id + (s.chat ? ' chat' : ''));
+      go.onclick = () => { pick.has(k) ? pick.delete(k) : pick.add(k); go.setAttribute('aria-pressed', pick.has(k)); paintGo(); };
+      del.textContent = '\u00d7';
+      del.title = 'Remove from favorites';
+      del.setAttribute('aria-label', `Remove ${label(s)} from favorites`);
+      del.onclick = () => { setFav(k, false); pick.delete(k); paintHome(); };
+      chip.append(go, del);
+      return chip;
+    }));
+    sec.append(h, row);
+    return sec;
+  }));
+  if (!list.length) $('homeFavs').append(Object.assign(document.createElement('p'), { textContent: 'No favorites yet. Add channels here, or press Fav on any open stream.' }));
+  paintDots();
+  paintGo();
+}
+function paintDots() {
+  for (const go of $('homeFavs').querySelectorAll('[data-k]')) {
+    const live = liveMap.get(go.dataset.k), s = parse(go.dataset.k);
+    if (s.chat) continue; // a chat has no dot
+    go.firstChild.className = 'dot' + (live ? ' on' : live === false ? ' off' : '');
+    go.title = live ? 'Live' : live === false ? 'Offline' : '';
+    go.setAttribute('aria-label', label(s) + (live ? ', live' : live === false ? ', offline' : ''));
+  }
+}
+async function homeDots() {
+  const got = await lives(favList().filter(s => !s.chat));
+  got.forEach((v, k) => { if (v !== null || !liveMap.has(k)) liveMap.set(k, v); }); // a failed check keeps the last answer
+  paintDots();
+}
+function paintGo() {
+  const n = homeResult().length;
+  drawPresets($('homeLay'), n || 4, p => { homeLay = homeLay === p ? null : p; paintGo(); $('homeLay').querySelector('[aria-pressed=true]')?.focus(); }, homeLay);
+  $('homeGo').textContent = n ? `Watch ${n} stream${n > 1 ? 's' : ''}` : 'Watch';
+  $('homeGo').disabled = !n;
+}
+$('homeGo').onclick = () => {
+  $('msg').textContent = '';
+  streams = homeResult();
+  document.body.classList.remove('home');
+  homeLay ? applyLayout(homeLay) : render();
+};
+$('homeBtn').onclick = () => { document.body.classList.toggle('home'); render(); };
+
+// Reads one of the two "URL or channel name" boxes. Says so when it cannot; null also for an empty box.
+async function readBox(input, plat) {
+  const text = input.value, s = parse(text, plat.value);
+  $('msg').textContent = '';
+  if (!text.trim()) return null;
+  if (!s) return void ($('msg').textContent = 'Could not read that as a stream.');
+  input.value = '';
+  return durable(s);
+}
+$('homeAdd').onsubmit = async e => {
+  e.preventDefault();
+  const s = await readBox($('homeUrl'), $('homePlat'));
+  if (!s) return;
+  setFav(key(s), true);
+  pick.add(key(s));
+  paintHome();
+  homeDots();
+};
+
+// Once a minute: refresh the dots on the home page, and look at the tiles that are waiting for their
+// channel (el.watch). Twitch and Kick tiles start when the channel was seen offline and is now live,
+// which also keeps a tile that fell back to the embed while live from being restarted in a loop.
+// A YouTube channel tile restarts when the channel is live with a video other than the one in the tile,
+// unless that one is still live too, or cannot be checked (channels with several streams at once).
+async function poll() {
+  if (document.hidden) return;
+  if (!$('home').hidden) homeDots();
+  const open = streams.filter(s => !s.chat && tiles.get(key(s))?.watch);
+  const got = await lives(open.filter(s => s.p !== 'y'));
+  for (const s of open) {
+    const k = key(s), el = tiles.get(k);
+    if (!el?.watch) continue; // removed or restarted while we were asking
+    let go = false;
+    if (s.p === 'y') {
+      const i = await ytInfo(s.id);
+      go = i.live && i.videoId !== el.vid && (el.vid.length !== 11 || (await ytInfo(el.vid)).live === false); // unknown: leave it
+    } else if (got.get(k) === false) {
+      if (!el.wasOff) el.tag('Offline', OFFLINE);
+      el.wasOff = true;
+    } else go = got.get(k) && el.wasOff;
+    if (!go || tiles.get(k) !== el || !el.watch) continue;
+    delete ytCache[s.id];
+    el.start();
+    if (s.p === 'y') { tiles.get(key({ ...s, chat: true }))?.start(); showChat(); } // its chat belongs to the old video
+  }
+}
+setInterval(poll, 60000);
 
 function setClean(on) {
   document.body.classList.toggle('clean', on);
@@ -546,21 +864,20 @@ function setClean(on) {
 }
 $('cleanBtn').onclick = () => setClean(!document.body.classList.contains('clean'));
 
-$('bar').onsubmit = e => {
+$('bar').onsubmit = async e => {
   e.preventDefault();
-  const text = $('url').value, s = parse(text, $('plat').value);
-  $('msg').textContent = '';
-  if (!text.trim()) return;
-  if (!s) return void ($('msg').textContent = 'Could not read that as a stream.');
+  const s = await readBox($('url'), $('plat'));
+  if (!s) return;
   if (!streams.some(x => key(x) === key(s))) streams.push(s);
-  $('url').value = '';
+  document.body.classList.remove('home');
   render();
 };
 $('menuBtn').onclick = () => store('min', document.body.classList.toggle('min') ? '1' : '');
 $('chatSel').onchange = showChat;
 $('chatBtn').onclick = () => { store('nochat', document.body.classList.toggle('nochat') ? '1' : ''); render(); };
 $('muteBtn').onclick = () => setSound(null);
-$('shareBtn').onclick = () => navigator.clipboard.writeText(location.href).then(
+// The copied address also carries the layout (readLay), so the other side sees the same arrangement.
+$('shareBtn').onclick = () => navigator.clipboard.writeText(streams.length ? `${location.href.split('#')[0]}#${streams.map(key).join(',')},${layItem()}` : location.href).then(
   () => { $('shareBtn').textContent = 'Copied'; setTimeout(() => $('shareBtn').textContent = 'Share', 1500); },
   () => { $('msg').textContent = 'Copy the address bar; clipboard access was refused.'; });
 $('fsBtn').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.();
@@ -574,6 +891,20 @@ div.onpointermove = e => {
   render();
 };
 div.onpointerup = () => { document.body.classList.remove('dragging'); store('chatW', $('chat').style.width); };
+
+// Keys: 1-9 give sound to that stream (again to mute it), M mutes all, F fullscreen, C chat, H home.
+// Not while typing, and not inside a player: a focused iframe keeps its own keys.
+addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest?.('input, select, textarea, dialog')) return;
+  const vids = streams.filter(s => !s.chat), n = +e.key, c = e.key.toLowerCase();
+  if (n >= 1 && n <= vids.length) setSound(soundKey === key(vids[n - 1]) ? null : key(vids[n - 1]));
+  else if (c === 'm') setSound(null);
+  else if (c === 'f') $('fsBtn').click();
+  else if (c === 'c') $('chatBtn').click();
+  else if (c === 'h' || (c === 'escape' && document.body.classList.contains('home'))) $('homeBtn').click();
+  else return;
+  e.preventDefault();
+});
 
 addEventListener('resize', render);
 addEventListener('hashchange', () => load(location.hash.slice(1)));
@@ -596,6 +927,18 @@ if (location.search.startsWith('?test')) {
   eq(key(S('t', 'monstercat', true)), 'tc:monstercat');
   eq(parse('someone'), null);
   eq(parse('k:x"><script>'), null);
+  eq(parse('https://www.twitch.tv/videos/2301234567'), null);
+  eq(parse('https://clips.twitch.tv/SomeClipSlug'), null);
+  eq(parse('https://kick.com/video/0a1b2c3d'), null);
+  eq(parse('twitch.tv/videosguy'), S('t', 'videosguy'));
+  eq(parse('https://player.twitch.tv/?parent=x.test&channel=MonsterCat'), S('t', 'monstercat'));
+  eq(parse('https://www.twitch.tv/popout/monstercat/chat'), S('t', 'monstercat'));
+  eq(parse('l:3'), null);
+  eq(readLay('l:3'), { cols: 3, focus: -1 });
+  eq(readLay('l:r1'), { side: 'right', focus: 1 });
+  eq(readLay('l:b0'), { side: 'bottom', focus: 0 });
+  eq(readLay('l:x'), null);
+  eq(readLay('t:monstercat'), null);
   eq(chatUrl(S('y', 'UCSJ4gkVC6NrvII8umztf0Ow')), null);
   eq(layout(4, 1600, 900, -1).tiles[3], [800, 450, 800, 450]);
   eq(layout(3, 1600, 900, 0).tiles[0], [0, 0, 1600, 675]);
