@@ -21,6 +21,9 @@
   #home[hidden] { display: none; }
   #home h1 { margin: 0; font-size: 24px; }
   #home h2 { margin: 12px 0 0; font-size: 14px; color: #99a; }
+  .favs h3 { margin: 10px 0 6px; font-size: 13px; color: #99a; }
+  dialog .chips { justify-content: flex-start; }
+  dialog p { margin: 0 0 4px; color: #889; }
   #home p { margin: 0; color: #889; max-width: 560px; }
   #home form, .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 900px; }
   .chip { display: inline-flex; }
@@ -76,13 +79,12 @@
   body.min #bar > :not(#menuBtn) { display: none; }
   #url { width: 220px; }
   #msg { position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%); color: #f87171; z-index: 3; }
-  dialog { background: #0d0f1d; color: inherit; border: 1px solid #2a2e4a; border-radius: 16px; min-width: min(360px, 90vw); }
+  dialog { background: #0d0f1d; color: inherit; border: 1px solid #2a2e4a; border-radius: 16px; min-width: min(360px, 90vw); max-width: min(600px, 94vw); }
   dialog::backdrop { background: #000a; }
   dialog h2 { margin: 0 0 16px; font-size: 20px; }
   dialog h3 { margin: 20px 0 8px; font-size: 14px; color: #99a; }
   .list { list-style: none; padding: 0; margin: 0 0 12px; }
   .list:empty::after { content: 'Nothing saved yet.'; color: #889; }
-  #favList:empty::after { content: 'Press Fav on a stream to keep it here.'; }
   .list li { display: flex; gap: 6px; margin-bottom: 6px; }
   .list li button:first-child { flex: 1; text-align: left; }
   dialog form { display: flex; gap: 6px; margin-top: 6px; }
@@ -114,7 +116,7 @@
 <main id="stage"><section id="home" aria-labelledby="homeTitle" hidden>
   <h1 id="homeTitle">Multistream</h1>
   <p>Pick the streams you want, pick a layout, press Watch. To open a single stream, paste its URL in the toolbar below.</p>
-  <div id="homeFavs"></div>
+  <div id="homeFavs" class="favs"></div>
   <form id="homeAdd">
     <select id="homePlat" aria-label="Platform for bare channel names">
       <option value="t">Twitch</option><option value="k">Kick</option><option value="y">YouTube</option>
@@ -157,7 +159,8 @@
   <ul class="list"></ul>
   <form><input placeholder="Name for the current canvas" aria-label="Name for the current canvas" required maxlength="40"><button>Save</button></form>
   <h3>Favorite streams</h3>
-  <ul class="list" id="favList"></ul>
+  <p>Click one to put it on the canvas or take it off. Green dot: live now.</p>
+  <div id="dlgFavs" class="favs"></div>
   <form method="dialog"><button>Close</button></form>
 </dialog>
 <dialog id="layoutDlg" aria-labelledby="layoutTitle">
@@ -666,7 +669,7 @@ function saver(k, dlg, snapshot, open) {
 
 // Saved canvases: which streams are open.
 const drawSaved = saver('saved', $('savedDlg'), () => streams.map(key).join(','), load);
-$('savedBtn').onclick = () => { drawSaved(); drawFavs(); $('savedDlg').showModal(); };
+$('savedBtn').onclick = () => { drawSaved(); drawFavs(); homeDots(); $('savedDlg').showModal(); };
 
 // Favorite streams: stream keys ("t:name") kept in this browser. The home page is built from them.
 function favs() { try { return JSON.parse(store('favs')) || []; } catch { return []; } }
@@ -676,17 +679,45 @@ function setFav(k, on) {
   store('favs', JSON.stringify(on ? [...f, k] : f));
   tiles.get(k)?.querySelector('[data-a=fav]').setAttribute('aria-pressed', on);
 }
-function drawFavs() {
-  $('favList').replaceChildren(...favList().map(s => {
-    const k = key(s), li = document.createElement('li'), go = document.createElement('button'), del = document.createElement('button');
-    go.textContent = label(s);
-    go.onclick = () => { if (!streams.some(x => key(x) === k)) streams.push(s); render(); $('savedDlg').close(); };
-    del.textContent = 'Delete';
-    del.setAttribute('aria-label', 'Delete ' + label(s));
-    del.onclick = () => { setFav(k, false); drawFavs(); };
-    li.append(go, del);
-    return li;
+// The favorites as chips, grouped by platform, each with a dot that says whether it is live. Home uses
+// them to pick streams for Watch; the Saved dialog uses them to open or close a stream on the spot.
+// isOn(key) says whether a chip shows as chosen, toggle(key) is the click, redraw() follows a removal.
+function favChips(into, isOn, toggle, redraw, empty) {
+  const list = favList();
+  into.replaceChildren(...Object.keys(NAMES).filter(p => list.some(s => s.p === p)).map(p => {
+    const sec = document.createElement('section'), h = document.createElement('h3'), row = document.createElement('div');
+    h.textContent = NAMES[p];
+    row.className = 'chips';
+    row.append(...list.filter(s => s.p === p).map(s => {
+      const k = key(s), chip = document.createElement('span'), go = document.createElement('button'), del = document.createElement('button');
+      chip.className = 'chip';
+      go.type = del.type = 'button';
+      go.dataset.k = k;
+      go.setAttribute('aria-pressed', isOn(k));
+      if (!s.chat) go.append(Object.assign(document.createElement('span'), { className: 'dot' }));
+      go.append(s.id + (s.chat ? ' chat' : ''));
+      go.onclick = () => { toggle(k); go.setAttribute('aria-pressed', isOn(k)); };
+      del.textContent = '×';
+      del.title = 'Remove from favorites';
+      del.setAttribute('aria-label', `Remove ${label(s)} from favorites`);
+      del.onclick = () => { setFav(k, false); redraw(); };
+      chip.append(go, del);
+      return chip;
+    }));
+    sec.append(h, row);
+    return sec;
   }));
+  if (!list.length) into.append(Object.assign(document.createElement('p'), { textContent: empty }));
+  paintDots();
+}
+// In the Saved dialog a click acts at once and the dialog stays open, to swap several streams in one go.
+function drawFavs() {
+  const open = k => streams.some(x => key(x) === k);
+  favChips($('dlgFavs'), open, k => {
+    streams = open(k) ? streams.filter(x => key(x) !== k) : [...streams, parse(k)];
+    render();
+    if (!$('home').hidden) drawHome(); // home is showing behind the dialog: its picks follow
+  }, drawFavs, 'Press Fav on a stream to keep it here.');
 }
 
 // Layouts: how the streams are arranged, whatever they are.
@@ -753,36 +784,14 @@ function drawHome() {
   }));
 }
 function paintHome() {
-  const list = favList();
-  $('homeFavs').replaceChildren(...Object.keys(NAMES).filter(p => list.some(s => s.p === p)).map(p => {
-    const sec = document.createElement('div'), h = document.createElement('h2'), row = document.createElement('div');
-    h.textContent = NAMES[p];
-    row.className = 'chips';
-    row.append(...list.filter(s => s.p === p).map(s => {
-      const k = key(s), chip = document.createElement('span'), go = document.createElement('button'), del = document.createElement('button');
-      chip.className = 'chip';
-      go.type = del.type = 'button';
-      go.dataset.k = k;
-      go.setAttribute('aria-pressed', pick.has(k));
-      if (!s.chat) go.append(Object.assign(document.createElement('span'), { className: 'dot' }));
-      go.append(s.id + (s.chat ? ' chat' : ''));
-      go.onclick = () => { pick.has(k) ? pick.delete(k) : pick.add(k); go.setAttribute('aria-pressed', pick.has(k)); paintGo(); };
-      del.textContent = '\u00d7';
-      del.title = 'Remove from favorites';
-      del.setAttribute('aria-label', `Remove ${label(s)} from favorites`);
-      del.onclick = () => { setFav(k, false); pick.delete(k); paintHome(); };
-      chip.append(go, del);
-      return chip;
-    }));
-    sec.append(h, row);
-    return sec;
-  }));
-  if (!list.length) $('homeFavs').append(Object.assign(document.createElement('p'), { textContent: 'No favorites yet. Add channels here, or press Fav on any open stream.' }));
-  paintDots();
+  const f = favs();
+  for (const k of pick) if (!f.includes(k)) pick.delete(k); // removed from favorites: no longer a pick
+  favChips($('homeFavs'), k => pick.has(k), k => { pick.has(k) ? pick.delete(k) : pick.add(k); paintGo(); },
+    paintHome, 'No favorites yet. Add channels here, or press Fav on any open stream.');
   paintGo();
 }
 function paintDots() {
-  for (const go of $('homeFavs').querySelectorAll('[data-k]')) {
+  for (const go of document.querySelectorAll('.favs [data-k]')) {
     const live = liveMap.get(go.dataset.k), s = parse(go.dataset.k);
     if (s.chat) continue; // a chat has no dot
     go.firstChild.className = 'dot' + (live ? ' on' : live === false ? ' off' : '');
@@ -835,7 +844,7 @@ $('homeAdd').onsubmit = async e => {
 // unless that one is still live too, or cannot be checked (channels with several streams at once).
 async function poll() {
   if (document.hidden) return;
-  if (!$('home').hidden) homeDots();
+  if (!$('home').hidden || $('savedDlg').open) homeDots();
   const open = streams.filter(s => !s.chat && tiles.get(key(s))?.watch);
   const got = await lives(open.filter(s => s.p !== 'y'));
   for (const s of open) {

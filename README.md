@@ -38,7 +38,9 @@ Toolbar:
   column on the right, and named custom layouts that remember dragged sizes and the chat panel.
 - **Hide overlays**: stop the players showing their own title bars and controls on hover. While it is on
   you cannot click inside a player; turn it off to use a player's own controls.
-- **Saved**: named sets of streams, kept in this browser. Favorites are listed here too.
+- **Saved**: named sets of streams, kept in this browser. Your favorites are here too, grouped by
+  platform with the same live dots as Home: click one to put it on the canvas or take it off, without
+  leaving what you are watching.
 - **Share**: copy the address. The address holds the whole canvas, so a bookmark is also a saved canvas.
   The copied link also carries the layout (grid columns, or which stream is the big one).
 - **Fullscreen**, **Clear**.
