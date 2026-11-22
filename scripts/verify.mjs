@@ -13,22 +13,29 @@ const check = async (name, run) => {
 };
 const need = (cond, msg) => { if (!cond) throw new Error(msg); };
 const get = path => fetch(origin + path);
+// YouTube hands Cloudflare a stripped page about one time in four, and a channel's /live page can then
+// have nothing usable in it. That is expected and the page copes, so these lookups get three tries.
+const getYt = async query => {
+  let r;
+  for (let i = 0; i < 3 && !(r = await get('/api/yt?' + query)).ok; i++);
+  return r;
+};
 
 await check('page matches public/index.html', async () => {
   const [live, local] = await Promise.all([get('/').then(r => r.text()), readFile(new URL('../public/index.html', import.meta.url), 'utf8')]);
   need(live === local, 'the live page differs from the local file');
 });
 await check('/api/yt?handle=', async () => {
-  const r = await get('/api/yt?handle=lofigirl'), j = await r.json();
+  const r = await getYt('handle=lofigirl'), j = await r.json();
   need(r.ok && /^UC[\w-]{22}$/.test(j.channelId), `${r.status} ${JSON.stringify(j)}`);
   return j.live ? 'live, video ' + j.videoId : 'not live';
 });
 await check('/api/yt?channel=', async () => {
-  const r = await get('/api/yt?channel=UCSJ4gkVC6NrvII8umztf0Ow'), j = await r.json();
+  const r = await getYt('channel=UCSJ4gkVC6NrvII8umztf0Ow'), j = await r.json();
   need(r.ok && j.channelId === 'UCSJ4gkVC6NrvII8umztf0Ow', `${r.status} ${JSON.stringify(j)}`);
 });
 await check('/api/yt?video=', async () => {
-  const r = await get('/api/yt?video=jfKfPfyJRdk'), j = await r.json();
+  const r = await getYt('video=jfKfPfyJRdk'), j = await r.json();
   need(r.ok && j.channelId, `${r.status} ${JSON.stringify(j)}`);
   return j.handle ? '@' + j.handle : 'no handle in the page (channel id only)';
 });

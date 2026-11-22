@@ -62,7 +62,9 @@
   .split.h { cursor: row-resize; }
   .split:hover, body.dragging .split:active { background: #8b5cf6; }
   .pill, #bar { background: #0d0f1dee; border: 1px solid #2a2e4a; border-radius: 22px; display: flex; align-items: center; gap: 4px; padding: 4px 8px; }
-  .pill { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 8px); overflow-x: auto; white-space: nowrap; opacity: 0; transition: opacity .15s; }
+  /* Centered, and wrapping onto more rows in a narrow tile so no control ends up out of reach. */
+  .pill { position: absolute; top: 8px; left: 4px; right: 4px; margin: 0 auto; width: fit-content; flex-wrap: wrap; justify-content: center; opacity: 0; transition: opacity .15s; }
+  .pill > * { white-space: nowrap; }
   .tile:hover .pill, .pill:focus-within, body.dragging .pill { opacity: 1; }
   .grip { cursor: grab; touch-action: none; font-weight: 600; padding: 2px 6px; user-select: none; }
   button, select, input { font: inherit; color: inherit; background: #171a2e; border: 1px solid #2a2e4a; border-radius: 999px; padding: 3px 10px; }
@@ -99,7 +101,9 @@
     .pill { opacity: .9; }
     #bar { opacity: 1; }
     /* Menu collapses everything on touch: the toolbar and each stream's controls. */
-    body.min .pill { opacity: 0; pointer-events: none; }
+    /* A tapped stream still gets its controls (touch browsers keep :hover on the last thing tapped),
+       and they must then work: a pill that shows but ignores taps is worse than none. */
+    body.min .tile:not(:hover) .pill:not(:focus-within) { opacity: 0; pointer-events: none; }
     body.min #bar { opacity: .5; }
   }
   @media (pointer: coarse) { button, select, input { padding: 8px 12px; } .grip { padding: 8px 6px; } }
